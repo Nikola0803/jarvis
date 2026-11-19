@@ -104,8 +104,10 @@ async def api_voice(audio: UploadFile = File(...)):
     try:
         mp3_bytes = await elevenlabs_provider.synthesize(response.text)
         log.info("voice: TTS => %d bytes", len(mp3_bytes))
+        def _h(s: str) -> str:
+            return s.encode("ascii", errors="replace").decode("ascii")
         return Response(content=mp3_bytes, media_type="audio/mpeg",
-                        headers={"X-Transcript": text, "X-Reply": response.text[:200]})
+                        headers={"X-Transcript": _h(text[:200]), "X-Reply": _h(response.text[:200])})
     except Exception as exc:
         log.error("voice: TTS failed: %s", exc)
         return {"transcript": text, "reply": response.text, "error": f"TTS failed: {exc}"}
