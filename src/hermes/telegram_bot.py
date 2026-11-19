@@ -29,6 +29,8 @@ def build_app(
     db_path: str,
     elevenlabs_api_key: str | None = None,
     elevenlabs_voice_id: str | None = None,
+    anthropic_api_key: str | None = None,
+    anthropic_model: str = "claude-sonnet-4-5",
 ) -> Application:
     if elevenlabs_api_key:
         from .voice import elevenlabs_provider
@@ -136,12 +138,31 @@ def build_app(
         await update.message.reply_text("Conversation history cleared.")
 
     @owner_only(owner_id)
+    async def cmd_update(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if not anthropic_api_key:
+            await update.message.reply_text("Anthropic API key not configured.")
+            return
+        args = ctx.args
+        if not args:
+            await update.message.reply_text(
+                "Usage: /update <instruction>\nExample: /update make responses shorter"
+            )
+            return
+        instruction = " ".join(args)
+        await update.message.chat.send_action("typing")
+        await update.message.reply_text("Processing self-improvement request...")
+        from .self_improve import apply as _improve
+        status = await _improve(instruction, anthropic_api_key, anthropic_model)
+        await update.message.reply_text(status)
+
+    @owner_only(owner_id)
     async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        improve_line = "\n/update <instruction> - self-improve (Jarvis edits its own code)" if anthropic_api_key else ""
         msg = (
             "*Hermes Commands*\n"
             "/status - show monthly spend + voice status\n"
             "/reset - clear conversation history\n"
-            "/help - this message\n\n"
+            f"/help - this message{improve_line}\n\n"
             "*Trigger prefixes (force Claude):*\n"
             "/code, /analyze, /plan, /think, /research\n\n"
             "*Voice:* send a voice message to get a spoken reply"
@@ -151,6 +172,7 @@ def build_app(
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("update", cmd_update))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 

@@ -30,6 +30,8 @@ class Router:
         self._cfg = cfg.router
         self._db_path = cfg.database.path
         self._spend_cap = cfg.anthropic.spend_cap_usd
+        self._anthropic_key = cfg.anthropic.api_key
+        self._anthropic_model = cfg.anthropic.model
 
         self._providers: dict[str, any] = {
             "claude": ClaudeProvider(cfg.anthropic.api_key, cfg.anthropic.model),
@@ -79,6 +81,12 @@ class Router:
         return True
 
     async def route(self, text: str, history: list[dict] | None = None, max_tokens: int = 1024) -> LLMResponse:
+        from .self_improve import is_improve_request, apply as _improve
+        if is_improve_request(text) and self._anthropic_key:
+            status = await _improve(text, self._anthropic_key, self._anthropic_model)
+            return LLMResponse(text=status, provider="self", model="self-improve",
+                               input_tokens=0, output_tokens=0, cost_usd=0.0)
+
         history = history or []
         messages = history + [{"role": "user", "content": text}]
 

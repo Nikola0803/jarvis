@@ -58,6 +58,8 @@ async def main():
         db_path=cfg.database.path,
         elevenlabs_api_key=cfg.elevenlabs.api_key if cfg.elevenlabs else None,
         elevenlabs_voice_id=cfg.elevenlabs.voice_id if cfg.elevenlabs else None,
+        anthropic_api_key=cfg.anthropic.api_key if cfg.anthropic else None,
+        anthropic_model=cfg.anthropic.model if cfg.anthropic else "claude-sonnet-4-5",
     )
     await tg_app.initialize()
     await tg_app.start()
