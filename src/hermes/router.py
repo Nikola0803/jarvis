@@ -29,8 +29,14 @@ class Router:
         self._providers: dict[str, any] = {
             "claude": ClaudeProvider(cfg.anthropic.api_key, cfg.anthropic.model),
             "deepseek": DeepSeekProvider(cfg.deepseek.api_key, cfg.deepseek.model),
-            "gemini": GeminiProvider(cfg.gemini.api_key, cfg.gemini.model),
         }
+        if cfg.gemini:
+            self._providers["gemini"] = GeminiProvider(cfg.gemini.api_key, cfg.gemini.model)
+        else:
+            # No Gemini key -- reroute free tier and fallback to deepseek
+            self._cfg = RouterConfig(
+                **{**self._cfg.model_dump(), "free_fallback": "deepseek"}
+            )
 
     def _select_provider(self, text: str, history: list[dict]) -> str:
         text_lower = text.lower().strip()

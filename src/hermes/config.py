@@ -84,7 +84,7 @@ class Config(BaseModel):
     calendar: Optional[CalendarConfig] = None
     anthropic: AnthropicConfig
     deepseek: DeepSeekConfig
-    gemini: GeminiConfig
+    gemini: Optional[GeminiConfig] = None
     router: RouterConfig = RouterConfig()
     database: DatabaseConfig = DatabaseConfig()
     dashboard: DashboardConfig = DashboardConfig()
