@@ -149,7 +149,10 @@ export default function MiraWorld() {
         if (res.ok && res.headers.get("content-type")?.includes("audio")) {
           const reply = res.headers.get("X-Reply");
           if (reply) { setReplyText(reply); clearTimeout(replyTimer.current); replyTimer.current = setTimeout(() => setReplyText(""), 10000); }
-          await playAudio(await res.blob());
+          const buf = await res.arrayBuffer();
+          const mp3 = new Blob([buf], { type: "audio/mpeg" });
+          console.log("Z.E.R.O audio:", mp3.size, "bytes, type:", mp3.type);
+          await playAudio(mp3);
           setReplyText("");
         } else {
           const err = await res.json().catch(() => ({}));
