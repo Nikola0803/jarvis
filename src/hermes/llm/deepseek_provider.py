@@ -1,36 +1,47 @@
 from __future__ import annotations
-from openai import AsyncOpenAI
+import httpx
 from .base import LLMProvider, LLMResponse
 
 # DeepSeek V3 pricing
 _INPUT_PRICE = 0.14 / 1_000_000
 _OUTPUT_PRICE = 0.28 / 1_000_000
 
+_API_URL = "https://api.deepseek.com/v1/chat/completions"
+
 
 class DeepSeekProvider(LLMProvider):
     name = "deepseek"
 
     def __init__(self, api_key: str, model: str):
-        self._client = AsyncOpenAI(
-            api_key=api_key,
-            base_url="https://api.deepseek.com/v1",
-        )
+        self._api_key = api_key
         self._model = model
 
     async def complete(self, messages, system=None, max_tokens=1024) -> LLMResponse:
-        try:
-            full_messages = messages
-            if system:
-                full_messages = [{"role": "system", "content": system}] + messages
+        full_messages = messages
+        if system:
+            full_messages = [{"role": "system", "content": system}] + messages
 
-            resp = await self._client.chat.completions.create(
-                model=self._model,
-                messages=full_messages,
-                max_tokens=max_tokens,
-            )
-            text = resp.choices[0].message.content or ""
-            inp = resp.usage.prompt_tokens if resp.usage else 0
-            out = resp.usage.completion_tokens if resp.usage else 0
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
+                    _API_URL,
+                    headers={
+                        "Authorization": f"Bearer {self._api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self._model,
+                        "messages": full_messages,
+                        "max_tokens": max_tokens,
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+            text = data["choices"][0]["message"]["content"] or ""
+            usage = data.get("usage", {})
+            inp = usage.get("prompt_tokens", 0)
+            out = usage.get("completion_tokens", 0)
             cost = inp * _INPUT_PRICE + out * _OUTPUT_PRICE
 
             return LLMResponse(
