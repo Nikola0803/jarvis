@@ -25,9 +25,8 @@ async def main():
 
     log.info("Initializing database at %s", cfg.database.path)
     await init_db(cfg.database.path)
-    configure_dashboard(cfg.database.path, cfg, router)
-
     router = Router(cfg)
+    configure_dashboard(cfg.database.path, cfg, router)
 
     async def handle_message(platform: str, user_id: str, text: str) -> str:
         """Unified handler called by every platform adapter."""
