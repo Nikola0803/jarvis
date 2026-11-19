@@ -2,6 +2,21 @@ telegram:
   bot_token: "YOUR_BOT_TOKEN_FROM_BOTFATHER"
   owner_user_id: 123456789      # your numeric Telegram ID (get from @userinfobot)
 
+# Remove the entire block for any platform you don't want
+whatsapp:
+  access_token: "YOUR_META_ACCESS_TOKEN"
+  phone_number_id: "YOUR_PHONE_NUMBER_ID"
+  verify_token: "YOUR_CUSTOM_VERIFY_TOKEN"  # any string you choose
+  app_secret: "YOUR_APP_SECRET"             # optional, for signature verification
+
+discord:
+  bot_token: "YOUR_DISCORD_BOT_TOKEN"
+  owner_id: 123456789           # your Discord user ID (optional)
+
+slack:
+  bot_token: "xoxb-..."
+  signing_secret: "YOUR_SLACK_SIGNING_SECRET"
+
 anthropic:
   api_key: "sk-ant-..."
   model: "claude-sonnet-4-5"

@@ -11,6 +11,23 @@ class TelegramConfig(BaseModel):
     owner_user_id: int
 
 
+class WhatsAppConfig(BaseModel):
+    access_token: str
+    phone_number_id: str
+    verify_token: str
+    app_secret: str = ""
+
+
+class DiscordConfig(BaseModel):
+    bot_token: str
+    owner_id: Optional[int] = None
+
+
+class SlackConfig(BaseModel):
+    bot_token: str
+    signing_secret: str
+
+
 class AnthropicConfig(BaseModel):
     api_key: str
     model: str = "claude-sonnet-4-5"
@@ -49,6 +66,9 @@ class DashboardConfig(BaseModel):
 
 class Config(BaseModel):
     telegram: TelegramConfig
+    whatsapp: Optional[WhatsAppConfig] = None
+    discord: Optional[DiscordConfig] = None
+    slack: Optional[SlackConfig] = None
     anthropic: AnthropicConfig
     deepseek: DeepSeekConfig
     gemini: GeminiConfig
