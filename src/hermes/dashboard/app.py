@@ -95,7 +95,7 @@ async def api_voice(audio: UploadFile = File(...)):
         return {"transcript": text, "error": "router not available"}  # type: ignore
 
     response = await _router.route(text, [])
-    log.info("voice: LLM => %r", response.text[:120])
+    log.info("voice: LLM => %r (error=%s)", response.text[:120], response.error)
 
     try:
         mp3_bytes = await elevenlabs_provider.synthesize(response.text)
