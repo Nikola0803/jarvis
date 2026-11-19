@@ -25,7 +25,7 @@ async def main():
 
     log.info("Initializing database at %s", cfg.database.path)
     await init_db(cfg.database.path)
-    configure_dashboard(cfg.database.path)
+    configure_dashboard(cfg.database.path, cfg)
 
     router = Router(cfg)
 
@@ -57,6 +57,8 @@ async def main():
         owner_id=cfg.telegram.owner_user_id,
         router=router,
         db_path=cfg.database.path,
+        elevenlabs_api_key=cfg.elevenlabs.api_key if cfg.elevenlabs else None,
+        elevenlabs_voice_id=cfg.elevenlabs.voice_id if cfg.elevenlabs else None,
     )
     await tg_app.initialize()
     await tg_app.start()

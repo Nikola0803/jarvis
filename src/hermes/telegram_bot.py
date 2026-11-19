@@ -1,4 +1,5 @@
 from __future__ import annotations
+import io
 import logging
 from functools import wraps
 from telegram import Update
@@ -21,7 +22,21 @@ def owner_only(owner_id: int):
     return decorator
 
 
-def build_app(bot_token: str, owner_id: int, router: Router, db_path: str) -> Application:
+def build_app(
+    bot_token: str,
+    owner_id: int,
+    router: Router,
+    db_path: str,
+    elevenlabs_api_key: str | None = None,
+    elevenlabs_voice_id: str | None = None,
+) -> Application:
+    if elevenlabs_api_key:
+        from .voice import elevenlabs_provider
+        elevenlabs_provider.init(
+            api_key=elevenlabs_api_key,
+            voice_id=elevenlabs_voice_id or elevenlabs_provider.DEFAULT_VOICE_ID,
+        )
+
     app = Application.builder().token(bot_token).build()
 
     @owner_only(owner_id)
@@ -29,7 +44,6 @@ def build_app(bot_token: str, owner_id: int, router: Router, db_path: str) -> Ap
         text = update.message.text or ""
         await update.message.chat.send_action("typing")
 
-        # Simple context window: last 10 messages from chat data
         history = ctx.chat_data.get("history", [])
         response = await router.route(text, history)
 
@@ -40,7 +54,63 @@ def build_app(bot_token: str, owner_id: int, router: Router, db_path: str) -> Ap
         reply = response.text
         await update.message.reply_text(reply)
 
-        # Update history (keep last 10 exchanges = 20 messages)
+        history.append({"role": "user", "content": text})
+        history.append({"role": "assistant", "content": reply})
+        ctx.chat_data["history"] = history[-20:]
+
+        await log_message(db_path, text, response)
+
+    @owner_only(owner_id)
+    async def handle_voice(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        from .voice import elevenlabs_provider
+        if not elevenlabs_provider.is_ready():
+            await update.message.reply_text("Voice pipeline not configured.")
+            return
+
+        await update.message.chat.send_action("typing")
+
+        # Download OGG voice file from Telegram
+        tg_file = await ctx.bot.get_file(update.message.voice.file_id)
+        audio_bytes = bytes(await tg_file.download_as_bytearray())
+
+        # STT via Scribe v3
+        try:
+            text = await elevenlabs_provider.transcribe(audio_bytes)
+        except Exception as exc:
+            log.error("STT error: %s", exc)
+            await update.message.reply_text("Couldn't transcribe that. Try again.")
+            return
+
+        if not text:
+            await update.message.reply_text("Didn't catch anything.")
+            return
+
+        log.info("Voice STT: %r", text[:80])
+
+        # Route through LLM
+        history = ctx.chat_data.get("history", [])
+        response = await router.route(text, history)
+
+        if response.error and not response.text:
+            await update.message.reply_text("Something went wrong. Try again.")
+            return
+
+        reply = response.text
+
+        # TTS via v4 Turbo, send as audio
+        try:
+            audio_data = await elevenlabs_provider.synthesize(reply)
+            await update.message.reply_audio(
+                audio=io.BytesIO(audio_data),
+                filename="jarvis.mp3",
+                caption=f"_{text}_",
+                parse_mode="Markdown",
+            )
+        except Exception as exc:
+            log.error("TTS error: %s", exc)
+            # Fallback to text if voice fails
+            await update.message.reply_text(f"_{text}_\n\n{reply}", parse_mode="Markdown")
+
         history.append({"role": "user", "content": text})
         history.append({"role": "assistant", "content": reply})
         ctx.chat_data["history"] = history[-20:]
@@ -49,12 +119,15 @@ def build_app(bot_token: str, owner_id: int, router: Router, db_path: str) -> Ap
 
     @owner_only(owner_id)
     async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        from .voice import elevenlabs_provider
         spend = await get_monthly_spend(db_path)
         lines = ["*Hermes Status*", "Agent: running"]
         for provider, cost in spend.items():
             lines.append(f"{provider}: ${cost:.4f} this month")
         if not spend:
             lines.append("No spend recorded yet.")
+        voice_status = "enabled" if elevenlabs_provider.is_ready() else "disabled"
+        lines.append(f"Voice: {voice_status}")
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
     @owner_only(owner_id)
@@ -66,11 +139,12 @@ def build_app(bot_token: str, owner_id: int, router: Router, db_path: str) -> Ap
     async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         msg = (
             "*Hermes Commands*\n"
-            "/status - show monthly spend\n"
+            "/status - show monthly spend + voice status\n"
             "/reset - clear conversation history\n"
             "/help - this message\n\n"
             "*Trigger prefixes (force Claude):*\n"
-            "/code, /analyze, /plan, /think, /research"
+            "/code, /analyze, /plan, /think, /research\n\n"
+            "*Voice:* send a voice message to get a spoken reply"
         )
         await update.message.reply_text(msg, parse_mode="Markdown")
 
@@ -78,5 +152,6 @@ def build_app(bot_token: str, owner_id: int, router: Router, db_path: str) -> Ap
     app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 
     return app

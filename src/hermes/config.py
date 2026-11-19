@@ -66,6 +66,11 @@ class RouterConfig(BaseModel):
     )
 
 
+class ElevenLabsConfig(BaseModel):
+    api_key: str
+    voice_id: str = "21m00Tcm4TlvDq8ikWAM"  # Rachel -- swap to any ElevenLabs voice ID
+
+
 class DatabaseConfig(BaseModel):
     path: str = "/home/hermes/.hermes/hermes.db"
 
@@ -85,6 +90,7 @@ class Config(BaseModel):
     anthropic: AnthropicConfig
     deepseek: DeepSeekConfig
     gemini: Optional[GeminiConfig] = None
+    elevenlabs: Optional[ElevenLabsConfig] = None
     router: RouterConfig = RouterConfig()
     database: DatabaseConfig = DatabaseConfig()
     dashboard: DashboardConfig = DashboardConfig()

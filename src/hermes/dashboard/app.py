@@ -14,11 +14,13 @@ app = FastAPI(title="Hermes Dashboard", docs_url=None, redoc_url=None)
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 _db_path: str = ""
+_cfg = None
 
 
-def configure(db_path: str) -> None:
-    global _db_path
+def configure(db_path: str, cfg=None) -> None:
+    global _db_path, _cfg
     _db_path = db_path
+    _cfg = cfg
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -44,6 +46,20 @@ async def api_spend():
 @app.get("/api/status")
 async def api_status():
     return {"status": "running", "db": _db_path}
+
+
+@app.get("/api/connections")
+async def api_connections():
+    """Live connection status for every integration Jarvis has."""
+    conns = {}
+    if _cfg:
+        conns["telegram"] = {"enabled": bool(_cfg.telegram), "label": "Telegram"}
+        conns["claude"] = {"enabled": bool(_cfg.anthropic), "label": "Claude"}
+        conns["deepseek"] = {"enabled": bool(_cfg.deepseek), "label": "DeepSeek"}
+        conns["gemini"] = {"enabled": bool(_cfg.gemini), "label": "Gemini"}
+        conns["elevenlabs"] = {"enabled": bool(_cfg.elevenlabs), "label": "ElevenLabs Voice"}
+        conns["calendar"] = {"enabled": bool(_cfg.calendar), "label": "Google Calendar"}
+    return conns
 
 
 @app.get("/api/live")
