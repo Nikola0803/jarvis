@@ -26,11 +26,10 @@ def is_ready() -> bool:
     return _client is not None
 
 
-def _transcribe_sync(audio_bytes: bytes) -> str:
+def _transcribe_sync(audio_bytes: bytes, filename: str, mime: str) -> str:
     assert _client is not None
-    # Pass as (filename, bytes, mime) so the SDK knows it's OGG from Telegram
     result = _client.speech_to_text.convert(
-        audio=("voice.ogg", io.BytesIO(audio_bytes), "audio/ogg"),
+        audio=(filename, io.BytesIO(audio_bytes), mime),
         model_id=SCRIBE_MODEL,
     )
     return (result.text or "").strip()
@@ -47,10 +46,10 @@ def _synthesize_sync(text: str) -> bytes:
     return b"".join(chunks)
 
 
-async def transcribe(audio_bytes: bytes) -> str:
+async def transcribe(audio_bytes: bytes, filename: str = "voice.ogg", mime: str = "audio/ogg") -> str:
     if _client is None:
         raise RuntimeError("ElevenLabs not initialised -- missing API key")
-    return await asyncio.to_thread(_transcribe_sync, audio_bytes)
+    return await asyncio.to_thread(_transcribe_sync, audio_bytes, filename, mime)
 
 
 async def synthesize(text: str) -> bytes:

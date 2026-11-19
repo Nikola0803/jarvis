@@ -74,9 +74,11 @@ async def api_voice(audio: UploadFile = File(...)):
         return {"error": "Voice pipeline not configured"}
 
     audio_bytes = await audio.read()
+    filename = audio.filename or "voice.webm"
+    mime = audio.content_type or "audio/webm"
 
     try:
-        text = await elevenlabs_provider.transcribe(audio_bytes)
+        text = await elevenlabs_provider.transcribe(audio_bytes, filename, mime)
     except Exception as exc:
         return {"error": f"STT failed: {exc}"}
 

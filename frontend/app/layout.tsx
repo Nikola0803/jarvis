@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "MIRA-HUD",
-  description: "The MIRA HUD only (MIT): violet AI-agent interface with a living field, orbiting light lines and a particle core. The MIRA Humanoid is not included.",
+  title: "Z.E.R.O",
+  description: "Zero-latency Executive Reasoning Orchestrator -- Jarvis AI command center.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

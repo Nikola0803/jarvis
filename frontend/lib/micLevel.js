@@ -30,6 +30,9 @@ export function stopMic() {
 }
 
 // null = no live mic; otherwise a smoothed 0..1 loudness.
+// Returns the raw MediaStream for use with MediaRecorder
+export function getMicStream() { return stream; }
+
 export function micLevel() {
   if (!analyser) return null;
   analyser.getFloatTimeDomainData(buf);

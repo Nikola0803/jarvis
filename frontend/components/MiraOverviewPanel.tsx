@@ -22,6 +22,9 @@ type JarvisLive = {
   spend_month_usd: number;
 };
 
+type Conn = { enabled: boolean; label: string };
+type Connections = Record<string, Conn>;
+
 function useJarvisLive() {
   const [data, setData] = useState<JarvisLive | null>(null);
   useEffect(() => {
@@ -33,6 +36,22 @@ function useJarvisLive() {
         .catch(() => {});
     load();
     const id = setInterval(load, 15000);
+    return () => { ok = false; clearInterval(id); };
+  }, []);
+  return data;
+}
+
+function useConnections() {
+  const [data, setData] = useState<Connections | null>(null);
+  useEffect(() => {
+    let ok = true;
+    const load = () =>
+      fetch("/api/jarvis/connections")
+        .then((r) => r.json())
+        .then((d) => { if (ok) setData(d); })
+        .catch(() => {});
+    load();
+    const id = setInterval(load, 30000);
     return () => { ok = false; clearInterval(id); };
   }, []);
   return data;
@@ -109,6 +128,7 @@ function Clock() {
 export default function MiraOverviewPanel() {
   const [open, setOpen] = useState(false);
   const live = useJarvisLive();
+  const conns = useConnections();
   const FIL = open ? 480 : 380;
   const FIL_CAP = "calc(100vw - 184px)";
 
@@ -155,7 +175,7 @@ export default function MiraOverviewPanel() {
         <span style={{
           position: "absolute", top: 20, left: 10, fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.34em",
           color: `rgba(221,214,254,${open ? 0.9 : 0.55})`, transition: "color .4s",
-        }}>OVERVIEW</span>
+        }}>Z.E.R.O</span>
       </div>
 
       <div style={{ paddingLeft: 14, paddingTop: 6, width: "fit-content", maxWidth: "calc(100vw - 28px)", pointerEvents: "auto" }}>
@@ -199,6 +219,26 @@ export default function MiraOverviewPanel() {
                 </div>
               </div>
             </div>
+
+            {/* Connections grid */}
+            {conns && (
+              <>
+                <div style={{ fontSize: 9, letterSpacing: "0.26em", color: `${ACCENT}66`, marginTop: 6, paddingLeft: 2 }}>CONNECTIONS</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                  {Object.entries(conns).map(([key, c]) => (
+                    <div key={key} style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 10px",
+                      background: "rgba(14,8,26,0.6)", border: `1px solid ${ACCENT}1a`,
+                      borderRadius: 8, backdropFilter: "blur(6px)" }}>
+                      {dot(c.enabled ? "#4ade80" : "#374151")}
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 8.5, letterSpacing: "0.1em",
+                        color: c.enabled ? "rgba(240,237,232,0.75)" : "rgba(240,237,232,0.3)" }}>
+                        {c.label.toUpperCase()}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
 
           </div>
         )}
