@@ -87,45 +87,18 @@ export default function MiraWorld() {
     return new Promise((resolve) => {
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
-      let analyser, buf, rafId;
 
+      // Play directly without routing through WebAudio -- MediaElementSource causes
+      // mobile cutoffs. Visualization falls back to the fake-voice animation loop.
       audio.onplay = () => {
-        try {
-          const ctx = audioCtxRef.current;
-          if (ctx) {
-            const src = ctx.createMediaElementSource(audio);
-            analyser = ctx.createAnalyser();
-            analyser.fftSize = 512;
-            buf = new Float32Array(analyser.fftSize);
-            src.connect(analyser);
-            src.connect(ctx.destination);
-            isRealAudio.current = true;
-            setState("speaking");
-            const measure = () => {
-              if (!analyser || stateRef.current !== "speaking") return;
-              analyser.getFloatTimeDomainData(buf);
-              let sum = 0;
-              for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-              setVoiceEnergy("output", Math.min(1, Math.sqrt(sum / buf.length) * 12));
-              rafId = requestAnimationFrame(measure);
-            };
-            rafId = requestAnimationFrame(measure);
-          } else {
-            isRealAudio.current = true;
-            setState("speaking");
-          }
-        } catch (_) {
-          isRealAudio.current = true;
-          setState("speaking");
-        }
+        isRealAudio.current = true;
+        setState("speaking");
       };
 
       const done = () => {
         isRealAudio.current = false;
-        if (rafId) cancelAnimationFrame(rafId);
         setVoiceEnergy("output", 0);
         URL.revokeObjectURL(url);
-        // Reset audioCtxRef so next tap gets a fresh context (avoids createMediaElementSource reuse issues)
         audioCtxRef.current?.close().catch(() => {});
         audioCtxRef.current = null;
         resolve();
