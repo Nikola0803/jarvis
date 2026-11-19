@@ -97,6 +97,10 @@ async def api_voice(audio: UploadFile = File(...)):
     response = await _router.route(text, [])
     log.info("voice: LLM => %r (error=%s)", response.text[:120], response.error)
 
+    if not response.text:
+        log.error("voice: LLM returned empty text, error=%s", response.error)
+        return {"transcript": text, "reply": "I had a brain freeze -- check the logs.", "error": f"LLM empty: {response.error}"}
+
     try:
         mp3_bytes = await elevenlabs_provider.synthesize(response.text)
         log.info("voice: TTS => %d bytes", len(mp3_bytes))

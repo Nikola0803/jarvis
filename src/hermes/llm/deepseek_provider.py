@@ -42,4 +42,6 @@ class DeepSeekProvider(LLMProvider):
                 cost_usd=cost,
             )
         except Exception as e:
+            import traceback, logging
+            logging.getLogger("hermes.llm.deepseek").error("DeepSeek call failed:\n%s", traceback.format_exc())
             return LLMResponse(text="", provider="deepseek", model=self._model, error=str(e))
