@@ -58,7 +58,10 @@ async def main():
         router=router,
         db_path=cfg.database.path,
     )
-    tasks.append(tg_app.run_polling(drop_pending_updates=True))
+    await tg_app.initialize()
+    await tg_app.start()
+    await tg_app.updater.start_polling(drop_pending_updates=True)
+    log.info("Telegram bot polling started")
 
     # WhatsApp (optional -- webhook via FastAPI)
     if cfg.whatsapp:
@@ -105,7 +108,12 @@ async def main():
         cfg.dashboard.host, cfg.dashboard.port,
         sum(1 for x in [cfg.whatsapp, cfg.discord, cfg.slack] if x),
     )
-    await asyncio.gather(*tasks)
+    try:
+        await asyncio.gather(*tasks)
+    finally:
+        await tg_app.updater.stop()
+        await tg_app.stop()
+        await tg_app.shutdown()
 
 
 def run():
