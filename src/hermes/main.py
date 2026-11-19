@@ -25,7 +25,7 @@ async def main():
 
     log.info("Initializing database at %s", cfg.database.path)
     await init_db(cfg.database.path)
-    configure_dashboard(cfg.database.path, cfg)
+    configure_dashboard(cfg.database.path, cfg, router)
 
     router = Router(cfg)
 

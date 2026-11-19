@@ -3,8 +3,8 @@ import os
 import time
 from pathlib import Path
 from datetime import datetime, timezone
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request, UploadFile, File
+from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from ..db.queries import get_recent_messages, get_monthly_spend
 
@@ -15,12 +15,14 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 _db_path: str = ""
 _cfg = None
+_router = None
 
 
-def configure(db_path: str, cfg=None) -> None:
-    global _db_path, _cfg
+def configure(db_path: str, cfg=None, router=None) -> None:
+    global _db_path, _cfg, _router
     _db_path = db_path
     _cfg = cfg
+    _router = router
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -60,6 +62,38 @@ async def api_connections():
         conns["elevenlabs"] = {"enabled": bool(_cfg.elevenlabs), "label": "ElevenLabs Voice"}
         conns["calendar"] = {"enabled": bool(_cfg.calendar), "label": "Google Calendar"}
     return conns
+
+
+@app.post("/api/voice")
+async def api_voice(audio: UploadFile = File(...)):
+    """Voice endpoint: audio in -> STT -> LLM -> TTS -> MP3 out.
+    Used by Z.E.R.O HUD and wake word script."""
+    from ..voice import elevenlabs_provider
+
+    if not elevenlabs_provider.is_ready():
+        return {"error": "Voice pipeline not configured"}
+
+    audio_bytes = await audio.read()
+
+    try:
+        text = await elevenlabs_provider.transcribe(audio_bytes)
+    except Exception as exc:
+        return {"error": f"STT failed: {exc}"}
+
+    if not text:
+        return {"error": "empty transcription"}
+
+    if _router is None:
+        return {"transcript": text, "error": "router not available"}  # type: ignore
+
+    response = await _router.route(text, [])
+
+    try:
+        mp3_bytes = await elevenlabs_provider.synthesize(response.text)
+        return Response(content=mp3_bytes, media_type="audio/mpeg",
+                        headers={"X-Transcript": text, "X-Reply": response.text[:200]})
+    except Exception as exc:
+        return {"transcript": text, "reply": response.text, "error": f"TTS failed: {exc}"}
 
 
 @app.get("/api/live")

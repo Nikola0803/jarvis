@@ -28,8 +28,9 @@ def is_ready() -> bool:
 
 def _transcribe_sync(audio_bytes: bytes) -> str:
     assert _client is not None
+    # Pass as (filename, bytes, mime) so the SDK knows it's OGG from Telegram
     result = _client.speech_to_text.convert(
-        audio=io.BytesIO(audio_bytes),
+        audio=("voice.ogg", io.BytesIO(audio_bytes), "audio/ogg"),
         model_id=SCRIBE_MODEL,
     )
     return (result.text or "").strip()
