@@ -1,0 +1,100 @@
+:root {
+  --font-ui: "Space Grotesk", system-ui, sans-serif;
+  --font-mono: "Share Tech Mono", ui-monospace, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; padding: 0; }
+
+body {
+  background: #030108;
+  color: #f0ede8;
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* Overview lamp panel: pinned to the top-left, out of document flow. */
+.mira-overview {
+  position: fixed;
+  top: 10px;
+  left: 0;
+  width: 540px;
+  max-width: 92vw;
+  z-index: 30;
+}
+
+/* The invisible button over the ring: tap the orb to change MIRA's state. */
+.mira-tap {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: 330px;
+  height: 330px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  z-index: 20;
+}
+.mira-tap:focus-visible { outline: 2px solid #c4b5fd; outline-offset: 6px; }
+
+.repo-pill {
+  position: fixed;
+  top: 16px;
+  right: clamp(16px, 3vw, 40px);
+  z-index: 40;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: rgba(240, 237, 232, 0.7);
+  text-decoration: none;
+  border: 1px solid rgba(167, 139, 250, 0.3);
+  border-radius: 20px;
+  padding: 7px 0;
+  width: 190px;
+  box-sizing: border-box;
+  text-align: center;
+  background: rgba(6, 3, 13, 0.5);
+  backdrop-filter: blur(6px);
+}
+
+.dial-pill {
+  position: fixed;
+  top: 56px;
+  right: clamp(16px, 3vw, 40px);
+  z-index: 40;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: #e9d5ff;
+  border: 1px solid rgba(167, 139, 250, 0.55);
+  border-radius: 20px;
+  padding: 7px 0;
+  width: 190px;
+  box-sizing: border-box;
+  text-align: center;
+  background: rgba(124, 58, 237, 0.18);
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+  box-shadow: 0 0 16px rgba(167, 139, 250, 0.25);
+}
+.dial-pill:hover { background: rgba(124, 58, 237, 0.3); }
+
+/* Small screens: the panel shrinks so it never covers the orb's middle. */
+@media (max-width: 700px) {
+  .mira-overview { width: 100%; }
+  .repo-pill { top: auto; bottom: 16px; right: 16px; width: calc(50% - 22px); letter-spacing: .12em; }
+  .dial-pill { top: auto; bottom: 16px; right: auto; left: 16px; width: calc(50% - 22px); letter-spacing: .12em; }
+  /* The ring (and everything that measures it: core, lines, field) shrinks to fit a phone. */
+  .mira-orb-scale { transform: scale(0.7); transform-origin: center; }
+  .mira-overview { text-shadow: 0 1px 6px #000c; }
+  .mira-status { bottom: 62px !important; }
+}
+@media (max-width: 380px) {
+  .mira-orb-scale { transform: scale(0.62); }
+}
