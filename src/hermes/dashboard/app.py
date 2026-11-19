@@ -65,22 +65,12 @@ async def api_connections():
 
 
 @app.post("/api/voice")
-async def api_voice(request: Request, audio: UploadFile = File(...)):
+async def api_voice(audio: UploadFile = File(...)):
     """Voice endpoint: audio in -> STT -> LLM -> TTS -> MP3 out.
     Used by Z.E.R.O HUD and wake word script."""
     import logging
     log = logging.getLogger("hermes.voice")
     from ..voice import elevenlabs_provider
-
-    # Token guard: if a non-default secret_key is set, require matching header
-    if _cfg and hasattr(_cfg, "dashboard"):
-        secret = getattr(_cfg.dashboard, "secret_key", "")
-        if secret and secret != "change-me":
-            provided = request.headers.get("x-jarvis-token", "")
-            if provided != secret:
-                log.warning("voice: rejected request with bad token")
-                return Response(status_code=401, content='{"error":"unauthorized"}',
-                                media_type="application/json")
 
     if not elevenlabs_provider.is_ready():
         log.warning("voice: ElevenLabs not configured")
