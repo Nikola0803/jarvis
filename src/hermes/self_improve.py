@@ -127,11 +127,15 @@ Rules:
 """
 
     client = anthropic.AsyncAnthropic(api_key=anthropic_api_key)
-    msg = await client.messages.create(
-        model=model,
-        max_tokens=8192,
-        messages=[{"role": "user", "content": prompt}],
-    )
+    try:
+        msg = await client.messages.create(
+            model=model,
+            max_tokens=8192,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except Exception as exc:
+        log.error("self_improve: Claude API error: %s", exc)
+        return f"Claude API error: {exc}"
     raw = msg.content[0].text.strip()
 
     # Strip markdown fences if Claude added them despite instructions
