@@ -17,6 +17,20 @@ slack:
   bot_token: "xoxb-..."
   signing_secret: "YOUR_SLACK_SIGNING_SECRET"
 
+# Google Calendar (supports multiple accounts)
+# 1. Create OAuth2 credentials at console.cloud.google.com -> APIs & Services -> Credentials
+# 2. Download as google_credentials.json and place at the path below
+# 3. Run /cal auth in Telegram to authenticate each account
+calendar:
+  credentials_file: "/etc/hermes/google_credentials.json"
+  timezone: "Europe/Belgrade"   # your home timezone
+  accounts:
+    - name: "primary"
+      token_file: "/home/hermes/.hermes/google_token_primary.json"
+    # Add more accounts:
+    # - name: "work"
+    #   token_file: "/home/hermes/.hermes/google_token_work.json"
+
 anthropic:
   api_key: "sk-ant-..."
   model: "claude-sonnet-4-5"

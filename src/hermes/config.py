@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 import yaml
 from pydantic import BaseModel, Field
 
@@ -26,6 +26,17 @@ class DiscordConfig(BaseModel):
 class SlackConfig(BaseModel):
     bot_token: str
     signing_secret: str
+
+
+class GoogleAccountConfig(BaseModel):
+    name: str = "primary"
+    token_file: str = "/home/hermes/.hermes/google_token_primary.json"
+
+
+class CalendarConfig(BaseModel):
+    credentials_file: str = "/etc/hermes/google_credentials.json"
+    accounts: List[GoogleAccountConfig] = Field(default_factory=lambda: [GoogleAccountConfig()])
+    timezone: str = "Europe/Belgrade"
 
 
 class AnthropicConfig(BaseModel):
@@ -69,6 +80,7 @@ class Config(BaseModel):
     whatsapp: Optional[WhatsAppConfig] = None
     discord: Optional[DiscordConfig] = None
     slack: Optional[SlackConfig] = None
+    calendar: Optional[CalendarConfig] = None
     anthropic: AnthropicConfig
     deepseek: DeepSeekConfig
     gemini: GeminiConfig

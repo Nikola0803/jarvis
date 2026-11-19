@@ -31,6 +31,19 @@ async def main():
 
     async def handle_message(platform: str, user_id: str, text: str) -> str:
         """Unified handler called by every platform adapter."""
+        # Calendar / timezone intent intercept (before LLM)
+        if cfg.calendar:
+            from .integrations.calendar_commands import is_calendar_intent, handle as cal_handle
+            if is_calendar_intent(text):
+                cal_reply = await cal_handle(
+                    text,
+                    cfg.calendar,
+                    user_tz=cfg.calendar.timezone,
+                )
+                if cal_reply is not None:
+                    await log_message(cfg.database.path, text, type("R", (), {"text": cal_reply, "provider": "calendar", "tokens_used": 0, "cost_usd": 0.0, "error": None})())
+                    return cal_reply
+
         history = []
         response = await router.route(text, history)
         await log_message(cfg.database.path, text, response)

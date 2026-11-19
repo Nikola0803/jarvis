@@ -13,3 +13,7 @@ tiktoken==0.7.0
 # Optional platform integrations (comment out what you don't use)
 discord.py==2.3.2
 slack-bolt==1.18.1
+# Google Calendar integration
+google-auth==2.35.0
+google-auth-oauthlib==1.2.1
+google-api-python-client==2.149.0
