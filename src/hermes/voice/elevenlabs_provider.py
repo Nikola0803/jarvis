@@ -29,7 +29,7 @@ def is_ready() -> bool:
 def _transcribe_sync(audio_bytes: bytes, filename: str, mime: str) -> str:
     assert _client is not None
     result = _client.speech_to_text.convert(
-        audio=(filename, io.BytesIO(audio_bytes), mime),
+        file=(filename, io.BytesIO(audio_bytes), mime),
         model_id=SCRIBE_MODEL,
     )
     return (result.text or "").strip()
