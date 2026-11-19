@@ -4,6 +4,7 @@ anthropic>=0.34.2
 openai>=1.47.0          # DeepSeek uses OpenAI-compatible API
 google-generativeai>=0.8.3
 fastapi>=0.115.0
+python-multipart>=0.0.9
 uvicorn[standard]>=0.30.6
 jinja2>=3.1.4
 pyyaml>=6.0.2
