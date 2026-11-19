@@ -145,7 +145,12 @@ export default function MiraWorld() {
         const form = new FormData();
         const ext = (blob.type || "").includes("mp4") ? "voice.mp4" : "voice.webm";
         form.append("audio", blob, ext);
-        const res = await fetch("/api/jarvis/voice", { method: "POST", body: form });
+        const jarvisToken = process.env.NEXT_PUBLIC_JARVIS_TOKEN || "";
+        const res = await fetch("/api/jarvis/voice", {
+          method: "POST",
+          body: form,
+          headers: jarvisToken ? { "X-Jarvis-Token": jarvisToken } : {},
+        });
         if (res.ok && res.headers.get("content-type")?.includes("audio")) {
           const reply = res.headers.get("X-Reply");
           if (reply) { setReplyText(reply); clearTimeout(replyTimer.current); replyTimer.current = setTimeout(() => setReplyText(""), 10000); }
