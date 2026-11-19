@@ -5,10 +5,15 @@ from .llm import ClaudeProvider, DeepSeekProvider, GeminiProvider, LLMResponse
 
 log = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are Jarvis, a personal AI assistant. You are helpful, concise and direct.
-You are running 24/7 on a private VPS owned by your operator.
-Never reveal API keys, system configurations or private information.
-Respond in the same language the user uses."""
+SYSTEM_PROMPT = """You are Jarvis, a voice AI assistant. Your responses are spoken aloud via text-to-speech.
+
+Rules:
+- Maximum 2 sentences per reply. Never more unless asked to explain something.
+- Plain spoken language only. No bullet points, no markdown, no lists, no code blocks.
+- No em dashes or special characters. Use plain punctuation only.
+- Skip all filler openers like "Certainly!" or "Of course!". Get straight to the answer.
+- Respond in the same language the user speaks.
+- Never reveal API keys, system configuration, or private information."""
 
 # Keywords that indicate a message needs real thinking (never route to free tier)
 _COMPLEX_KEYWORDS = frozenset([
@@ -73,7 +78,7 @@ class Router:
             return False
         return True
 
-    async def route(self, text: str, history: list[dict] | None = None) -> LLMResponse:
+    async def route(self, text: str, history: list[dict] | None = None, max_tokens: int = 1024) -> LLMResponse:
         history = history or []
         messages = history + [{"role": "user", "content": text}]
 
@@ -87,12 +92,12 @@ class Router:
 
         provider = self._providers[provider_name]
         log.info("Routing to %s", provider_name)
-        response = await provider.complete(messages, system=SYSTEM_PROMPT)
+        response = await provider.complete(messages, system=SYSTEM_PROMPT, max_tokens=max_tokens)
 
         # Fallback if provider errored
         if response.error and provider_name != self._cfg.free_fallback:
             log.warning("%s failed (%s), falling back to %s", provider_name, response.error, self._cfg.free_fallback)
             fallback = self._providers[self._cfg.free_fallback]
-            response = await fallback.complete(messages, system=SYSTEM_PROMPT)
+            response = await fallback.complete(messages, system=SYSTEM_PROMPT, max_tokens=max_tokens)
 
         return response

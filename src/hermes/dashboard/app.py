@@ -94,7 +94,7 @@ async def api_voice(audio: UploadFile = File(...)):
     if _router is None:
         return {"transcript": text, "error": "router not available"}  # type: ignore
 
-    response = await _router.route(text, [])
+    response = await _router.route(text, [], max_tokens=80)
     log.info("voice: LLM => %r (error=%s)", response.text[:120], response.error)
 
     if not response.text:
