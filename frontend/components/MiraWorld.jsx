@@ -25,10 +25,12 @@ export default function MiraWorld() {
   const [state, setState] = useState("idle");
   const [reducedMotion, setReducedMotion] = useState(false);
   const [dialOpen, setDialOpen] = useState(false);
+  const [replyText, setReplyText] = useState("");
   const stateRef = useRef(state);
   const isRealAudio = useRef(false);
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
+  const replyTimer = useRef(null);
   stateRef.current = state;
 
   useEffect(() => {
@@ -149,10 +151,17 @@ export default function MiraWorld() {
         form.append("audio", blob, ext);
         const res = await fetch("/api/jarvis/voice", { method: "POST", body: form });
         if (res.ok && res.headers.get("content-type")?.includes("audio")) {
+          const reply = res.headers.get("X-Reply");
+          if (reply) { setReplyText(reply); clearTimeout(replyTimer.current); replyTimer.current = setTimeout(() => setReplyText(""), 10000); }
           await playAudio(await res.blob());
+          setReplyText("");
         } else {
           const err = await res.json().catch(() => ({}));
-          console.warn("Z.E.R.O voice error:", err);
+          if (err.reply) {
+            setReplyText(err.reply);
+            clearTimeout(replyTimer.current);
+            replyTimer.current = setTimeout(() => setReplyText(""), 10000);
+          }
         }
       } catch (err) {
         console.error("Z.E.R.O voice pipeline:", err);
@@ -202,6 +211,19 @@ export default function MiraWorld() {
       {dialOpen
         ? <MiraDial onClose={() => setDialOpen(false)} state={state} onState={setState} />
         : <button type="button" className="dial-pill" onClick={() => setDialOpen(true)} aria-label="Open the design dial">Design dial</button>}
+
+      {replyText && (
+        <div style={{
+          position: "fixed", bottom: 88, left: "50%", transform: "translateX(-50%)",
+          maxWidth: "min(480px, 90vw)", zIndex: 50,
+          background: "rgba(14,8,26,0.92)", border: "1px solid rgba(167,139,250,0.3)",
+          borderRadius: 14, padding: "12px 18px",
+          backdropFilter: "blur(16px)",
+        }}>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.26em", color: "#a78bfa", marginBottom: 6 }}>Z.E.R.O</div>
+          <div style={{ fontFamily: "var(--font-ui)", fontSize: 13, lineHeight: 1.55, color: "rgba(240,237,232,0.9)" }}>{replyText}</div>
+        </div>
+      )}
     </>
   );
 }
