@@ -25,6 +25,8 @@ export default function MiraWorld() {
   const [state, setState] = useState("idle");
   const [reducedMotion, setReducedMotion] = useState(false);
   const [dialOpen, setDialOpen] = useState(false);
+  const [textOpen, setTextOpen] = useState(false);
+  const [textInput, setTextInput] = useState("");
   const [replyText, setReplyText] = useState("");
   const stateRef = useRef(state);
   const isRealAudio = useRef(false);
@@ -32,6 +34,7 @@ export default function MiraWorld() {
   const chunksRef = useRef([]);
   const replyTimer = useRef(null);
   const audioCtxRef = useRef(null);
+  const textInputRef = useRef(null);
   stateRef.current = state;
 
   function unlockAudio() {
@@ -177,6 +180,40 @@ export default function MiraWorld() {
     });
   }
 
+  async function handleTextSubmit(e) {
+    e.preventDefault();
+    const text = textInput.trim();
+    if (!text || stateRef.current !== "idle") return;
+    setTextInput("");
+    setTextOpen(false);
+    setState("thinking");
+    try {
+      const res = await fetch("/api/jarvis/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (res.ok && res.headers.get("content-type")?.includes("audio")) {
+        const reply = res.headers.get("X-Reply");
+        if (reply) { setReplyText(reply); clearTimeout(replyTimer.current); replyTimer.current = setTimeout(() => setReplyText(""), 10000); }
+        const canStream = typeof window.MediaSource !== "undefined" && MediaSource.isTypeSupported("audio/mpeg");
+        if (canStream) {
+          await playStreamingAudio(res);
+        } else {
+          const buf = await res.arrayBuffer();
+          await playAudio(new Blob([buf], { type: "audio/mpeg" }));
+        }
+        setReplyText("");
+      } else {
+        const err = await res.json().catch(() => ({}));
+        if (err.reply || err.error) setReplyText(err.reply || err.error);
+      }
+    } catch (err) {
+      console.error("Z.E.R.O text pipeline:", err);
+    }
+    setState("idle");
+  }
+
   async function handleOrbTap() {
     const s = stateRef.current;
 
@@ -281,7 +318,60 @@ export default function MiraWorld() {
 
       {dialOpen
         ? <MiraDial onClose={() => setDialOpen(false)} state={state} onState={setState} />
-        : <button type="button" className="dial-pill" onClick={() => setDialOpen(true)} aria-label="Open the design dial">Design dial</button>}
+        : (
+          <div style={{ position: "fixed", bottom: 24, right: 24, zIndex: 50, display: "flex", gap: 8, alignItems: "center" }}>
+            <button
+              type="button"
+              onClick={() => { setTextOpen((v) => !v); setTimeout(() => textInputRef.current?.focus(), 50); }}
+              aria-label="Toggle text input"
+              title="Type to Jarvis"
+              style={{
+                background: textOpen ? "rgba(109,40,217,0.6)" : "rgba(14,8,26,0.7)",
+                border: "1px solid rgba(167,139,250,0.25)",
+                borderRadius: 10, padding: "7px 10px", cursor: "pointer",
+                color: "rgba(167,139,250,0.8)", fontSize: 14, lineHeight: 1,
+                backdropFilter: "blur(12px)",
+              }}
+            >⌨</button>
+            <button type="button" className="dial-pill" onClick={() => setDialOpen(true)} aria-label="Open the design dial">Design dial</button>
+          </div>
+        )}
+
+      {textOpen && (
+        <div style={{
+          position: "fixed", bottom: 72, left: "50%", transform: "translateX(-50%)",
+          width: "min(480px, 90vw)", zIndex: 50,
+          background: "rgba(14,8,26,0.92)", border: "1px solid rgba(167,139,250,0.25)",
+          borderRadius: 14, padding: "12px 14px",
+          backdropFilter: "blur(16px)",
+        }}>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 8, letterSpacing: "0.26em", color: "rgba(167,139,250,0.5)", marginBottom: 8 }}>TEXT INPUT</div>
+          <form onSubmit={handleTextSubmit} style={{ display: "flex", gap: 8 }}>
+            <input
+              ref={textInputRef}
+              type="text"
+              value={textInput}
+              onChange={(e) => setTextInput(e.target.value)}
+              placeholder="type to jarvis..."
+              disabled={state !== "idle"}
+              style={{
+                flex: 1, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(167,139,250,0.2)",
+                borderRadius: 8, padding: "9px 12px", color: "rgba(240,237,232,0.9)",
+                fontFamily: "var(--font-ui)", fontSize: 13, outline: "none",
+              }}
+            />
+            <button
+              type="submit"
+              disabled={!textInput.trim() || state !== "idle"}
+              style={{
+                background: "rgba(109,40,217,0.5)", border: "1px solid rgba(167,139,250,0.3)",
+                borderRadius: 8, padding: "9px 14px", color: "rgba(240,237,232,0.85)",
+                fontSize: 12, cursor: "pointer", opacity: (!textInput.trim() || state !== "idle") ? 0.4 : 1,
+              }}
+            >send</button>
+          </form>
+        </div>
+      )}
 
       {replyText && (
         <div style={{

@@ -47,7 +47,7 @@ def build_app(
         await update.message.chat.send_action("typing")
 
         history = ctx.chat_data.get("history", [])
-        response = await router.route(text, history)
+        response = await router.route(text, history, max_tokens=300)
 
         if response.error and not response.text:
             await update.message.reply_text("Something went wrong. Try again.")
@@ -89,9 +89,9 @@ def build_app(
 
         log.info("Voice STT: %r", text[:80])
 
-        # Route through LLM
+        # Route through LLM (voice -- keep short)
         history = ctx.chat_data.get("history", [])
-        response = await router.route(text, history)
+        response = await router.route(text, history, max_tokens=80)
 
         if response.error and not response.text:
             await update.message.reply_text("Something went wrong. Try again.")

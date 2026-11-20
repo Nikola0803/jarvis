@@ -133,6 +133,61 @@ async def api_voice(request: Request, audio: UploadFile = File(...)):
     )
 
 
+@app.post("/api/chat")
+async def api_chat(request: Request):
+    """Text input endpoint: JSON {text} -> LLM -> streaming TTS out."""
+    import logging
+    log = logging.getLogger("hermes.chat")
+
+    if _cfg and hasattr(_cfg, "dashboard"):
+        secret = getattr(_cfg.dashboard, "secret_key", "")
+        if secret and secret != "change-me":
+            if request.headers.get("x-jarvis-token", "") != secret:
+                return Response(status_code=401, content='{"error":"unauthorized"}',
+                                media_type="application/json")
+
+    try:
+        body = await request.json()
+    except Exception:
+        return Response(status_code=400, content='{"error":"bad request"}',
+                        media_type="application/json")
+
+    text = (body.get("text") or "").strip()
+    if not text:
+        return {"error": "empty text"}
+
+    if _router is None:
+        return {"error": "router not available"}
+
+    from ..voice import elevenlabs_provider
+    response = await _router.route(text, [], max_tokens=80)
+    log.info("chat: %r => %r", text[:60], response.text[:80])
+
+    if not response.text:
+        return {"error": f"LLM empty: {response.error}"}
+
+    def _h(s: str) -> str:
+        return s.encode("ascii", errors="replace").decode("ascii")
+
+    reply_text = response.text
+
+    async def _tts_stream():
+        try:
+            async for chunk in elevenlabs_provider.synthesize_stream(reply_text):
+                yield chunk
+        except Exception as exc:
+            log.error("chat: TTS stream error: %s", exc)
+
+    return StreamingResponse(
+        _tts_stream(),
+        media_type="audio/mpeg",
+        headers={
+            "X-Transcript": _h(text[:200]),
+            "X-Reply": _h(reply_text[:200]),
+        },
+    )
+
+
 @app.get("/api/live")
 async def api_live():
     messages = await get_recent_messages(_db_path, limit=50)
