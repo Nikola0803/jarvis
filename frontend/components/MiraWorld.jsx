@@ -9,7 +9,7 @@ import MiraStatusBar from "./MiraStatusBar";
 import MiraDial from "./MiraDial";
 import { enterMira, tickMiraVoice } from "../lib/miraStage";
 import { setVoiceEnergy, getVoiceEnergy } from "../lib/voiceEnergy";
-import { startMic, stopMic, micLevel, getMicStream } from "../lib/micLevel";
+import { stopMic, micLevel } from "../lib/micLevel";
 import "./mira-ring.css";
 
 const LABEL = { idle: "standby", listening: "listening", thinking: "processing", speaking: "speaking" };
@@ -34,11 +34,11 @@ export default function MiraWorld() {
   const [infoTab, setInfoTab] = useState("mail"); // "mail" | "cal"
   const stateRef = useRef(state);
   const isRealAudio = useRef(false);
-  const recorderRef = useRef(null);
-  const chunksRef = useRef([]);
   const replyTimer = useRef(null);
   const audioCtxRef = useRef(null);
   const textInputRef = useRef(null);
+  const vadRef = useRef(null);
+  const sendVoiceAudioRef = useRef(null);
   stateRef.current = state;
 
   async function fetchEmails() {
@@ -73,6 +73,14 @@ export default function MiraWorld() {
     } catch (_) {}
   }
 
+  // Unlock audio on first user interaction so playback works without a tap
+  useEffect(() => {
+    const once = () => { unlockAudio(); document.removeEventListener("click", once); document.removeEventListener("keydown", once); };
+    document.addEventListener("click", once);
+    document.addEventListener("keydown", once);
+    return () => { document.removeEventListener("click", once); document.removeEventListener("keydown", once); };
+  }, []);
+
   useEffect(() => {
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
     const apply = () => setReducedMotion(mq.matches);
@@ -82,6 +90,61 @@ export default function MiraWorld() {
   }, []);
 
   useEffect(() => { enterMira({ instant: true }); }, []);
+
+  // Always-on VAD: loads Silero VAD model, listens continuously
+  useEffect(() => {
+    let vad = null;
+
+    function float32ToWav(samples, rate = 16000) {
+      const len = samples.length * 2;
+      const buf = new ArrayBuffer(44 + len);
+      const v = new DataView(buf);
+      const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+      w(0, "RIFF"); v.setUint32(4, 36 + len, true);
+      w(8, "WAVE"); w(12, "fmt ");
+      v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+      v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true);
+      v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+      w(36, "data"); v.setUint32(40, len, true);
+      let o = 44;
+      for (let i = 0; i < samples.length; i++) {
+        const s = Math.max(-1, Math.min(1, samples[i]));
+        v.setInt16(o, s < 0 ? s * 0x8000 : s * 0x7FFF, true); o += 2;
+      }
+      return new Blob([buf], { type: "audio/wav" });
+    }
+
+    import("@ricky0123/vad-web").then(async ({ MicVAD, ort }) => {
+      // Single-threaded: no SharedArrayBuffer / COOP-COEP headers needed
+      ort.env.wasm.numThreads = 1;
+      ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.31.1/dist/";
+
+      vad = await MicVAD.new({
+        baseAssetPath: "/",
+        onnxWASMBasePath: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.31.1/dist/",
+        model: "v5",
+        startOnLoad: true,
+        onSpeechStart: () => {
+          if (stateRef.current !== "idle") return;
+          unlockAudio();
+          setState("listening");
+        },
+        onSpeechEnd: (audio) => {
+          if (stateRef.current !== "listening") return;
+          setState("thinking");
+          if (sendVoiceAudioRef.current) sendVoiceAudioRef.current(float32ToWav(audio));
+        },
+        onVADMisfire: () => {
+          if (stateRef.current === "listening") setState("idle");
+        },
+      });
+      vadRef.current = vad;
+    }).catch((err) => {
+      console.error("VAD init failed:", err);
+    });
+
+    return () => { vad?.destroy(); };
+  }, []);
 
   // Animation loop: drives fake voice when no real audio is playing
   useEffect(() => {
@@ -105,10 +168,6 @@ export default function MiraWorld() {
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  // Start mic for visualization when listening; cleanup on unmount
-  useEffect(() => {
-    if (state === "listening") startMic();
-  }, [state]);
   useEffect(() => () => stopMic(), []);
 
   async function playAudio(blob) {
@@ -205,6 +264,37 @@ export default function MiraWorld() {
     });
   }
 
+  async function sendVoiceAudio(blob) {
+    if (!blob || blob.size < 1000) { setState("idle"); return; }
+    try {
+      const form = new FormData();
+      form.append("audio", blob, "voice.wav");
+      const res = await fetch("/api/jarvis/voice", { method: "POST", body: form });
+      if (res.ok && res.headers.get("content-type")?.includes("audio")) {
+        const reply = res.headers.get("X-Reply");
+        if (reply) { setReplyText(reply); clearTimeout(replyTimer.current); replyTimer.current = setTimeout(() => setReplyText(""), 10000); }
+        const canStream = typeof window.MediaSource !== "undefined" && MediaSource.isTypeSupported("audio/mpeg");
+        if (canStream) {
+          await playStreamingAudio(res);
+        } else {
+          const buf = await res.arrayBuffer();
+          await playAudio(new Blob([buf], { type: "audio/mpeg" }));
+        }
+        setReplyText("");
+      } else {
+        const err = await res.json().catch(() => ({}));
+        const msg = err.reply || err.error;
+        if (msg) { setReplyText(msg); clearTimeout(replyTimer.current); replyTimer.current = setTimeout(() => setReplyText(""), 10000); }
+      }
+    } catch (err) {
+      console.error("Z.E.R.O voice pipeline:", err);
+    }
+    setState("idle");
+  }
+
+  // Keep ref up-to-date so the VAD closure (created once) always calls the latest version
+  sendVoiceAudioRef.current = sendVoiceAudio;
+
   async function handleTextSubmit(e) {
     e.preventDefault();
     const text = textInput.trim();
@@ -239,78 +329,14 @@ export default function MiraWorld() {
     setState("idle");
   }
 
-  async function handleOrbTap() {
-    const s = stateRef.current;
-
-    if (s === "idle") {
-      await startMic();
-      const micStream = getMicStream();
-      if (!micStream) {
-        setReplyText("Microphone access denied. Allow mic in your browser address bar, then try again.");
-        clearTimeout(replyTimer.current);
-        replyTimer.current = setTimeout(() => setReplyText(""), 8000);
-        return;
-      }
-      chunksRef.current = [];
-      const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
-      const mr = new MediaRecorder(micStream, { mimeType });
-      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-      mr.start(100);
-      recorderRef.current = mr;
-      setState("listening");
-
-    } else if (s === "listening") {
-      unlockAudio(); // must run synchronously in gesture handler before any async code
-      const mr = recorderRef.current;
-      setState("thinking");
-      let blob;
-      if (mr) {
-        blob = await new Promise((res) => {
-          mr.onstop = () => res(new Blob(chunksRef.current, { type: mr.mimeType || "audio/webm" }));
-          mr.stop();
-        });
-      }
-      stopMic();
-      recorderRef.current = null;
-
-      if (!blob || blob.size < 1000) { setState("idle"); return; }
-
-      try {
-        const form = new FormData();
-        const ext = (blob.type || "").includes("mp4") ? "voice.mp4" : "voice.webm";
-        form.append("audio", blob, ext);
-        const res = await fetch("/api/jarvis/voice", { method: "POST", body: form });
-        if (res.ok && res.headers.get("content-type")?.includes("audio")) {
-          const reply = res.headers.get("X-Reply");
-          if (reply) { setReplyText(reply); clearTimeout(replyTimer.current); replyTimer.current = setTimeout(() => setReplyText(""), 10000); }
-          const canStream = typeof window.MediaSource !== "undefined" && MediaSource.isTypeSupported("audio/mpeg");
-          if (canStream) {
-            await playStreamingAudio(res);
-          } else {
-            const buf = await res.arrayBuffer();
-            const mp3 = new Blob([buf], { type: "audio/mpeg" });
-            await playAudio(mp3);
-          }
-          setReplyText("");
-        } else {
-          const err = await res.json().catch(() => ({}));
-          const msg = err.reply || err.error;
-          if (msg) {
-            setReplyText(msg);
-            clearTimeout(replyTimer.current);
-            replyTimer.current = setTimeout(() => setReplyText(""), 10000);
-          }
-        }
-      } catch (err) {
-        console.error("Z.E.R.O voice pipeline:", err);
-      }
-      setState("idle");
-
-    } else if (s === "speaking") {
+  function handleOrbTap() {
+    // Tap while speaking: interrupt playback and return to listening
+    if (stateRef.current === "speaking") {
       isRealAudio.current = false;
       setVoiceEnergy("output", 0);
       setState("idle");
     }
+    // idle/listening/thinking: VAD handles everything automatically
   }
 
   return (
@@ -341,8 +367,8 @@ export default function MiraWorld() {
       <button
         type="button"
         onClick={handleOrbTap}
-        aria-label={`Z.E.R.O is ${LABEL[state]}. ${state === "idle" ? "Tap to speak." : state === "listening" ? "Tap to send." : state === "speaking" ? "Tap to stop." : "Processing..."}`}
-        title={state === "idle" ? "Tap to speak" : state === "listening" ? "Tap to send" : state === "thinking" ? "Processing..." : "Tap to stop"}
+        aria-label={`Z.E.R.O is ${LABEL[state]}. ${state === "speaking" ? "Tap to stop." : "Always listening."}`}
+        title={state === "speaking" ? "Tap to stop" : state === "thinking" ? "Processing..." : "Always listening"}
         className="mira-tap"
       />
 

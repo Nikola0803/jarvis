@@ -54,8 +54,7 @@ function MiraStatusBar({
         {[0, 1, 2].map(i => <circle key={i} cx={cx + (i - 1) * 12} cy={cy + 62} r={2.5} fill={A} className={`orb-dot-blink blink-${i}`} />)}
 
         
-        {!isActive && <text x={cx} y={cy + 80} textAnchor="middle" fill={A} fontSize="9" fontFamily="'Share Tech Mono', monospace" letterSpacing="0.14em" opacity="0.32">{"TAP THE ORB TO CHANGE HER STATE"}</text>}
-        {state === "listening" && <text x={cx} y={cy + 80} textAnchor="middle" fill={A} fontSize="9" fontFamily="'Share Tech Mono', monospace" letterSpacing="0.14em" opacity="0.55">{"TAP AGAIN TO SEND"}</text>}
+        {!isActive && <text x={cx} y={cy + 80} textAnchor="middle" fill={A} fontSize="9" fontFamily="'Share Tech Mono', monospace" letterSpacing="0.14em" opacity="0.32">{"ALWAYS LISTENING"}</text>}
       </svg>
     </div>;
 }
