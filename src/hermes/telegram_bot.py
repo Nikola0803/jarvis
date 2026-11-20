@@ -182,8 +182,12 @@ def build_app(
         improve_line = "\n/update <instruction> - self-improve (Jarvis edits its own code)" if anthropic_api_key else ""
         msg = (
             "*Hermes Commands*\n"
-            "/status - show monthly spend + voice status\n"
+            "/status - monthly spend + voice status\n"
             "/reset - clear conversation history\n"
+            "/memory - see what Hermes knows about you\n"
+            "/remember key=value - store a profile fact\n"
+            "/agent list - list all running agents\n"
+            "/agent <name> - manually trigger an agent\n"
             f"/help - this message{improve_line}\n\n"
             "*Trigger prefixes (force Claude):*\n"
             "/code, /analyze, /plan, /think, /research\n\n"
@@ -275,11 +279,70 @@ def build_app(
                 f"Agent not found: {sub}\nAvailable: {', '.join(names)}"
             )
 
+    @owner_only(owner_id)
+    async def cmd_remember(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """/remember key=value -- store a profile fact.
+        Examples:
+          /remember name=Nikola
+          /remember timezone=Europe/Belgrade
+          /remember Ivan is my main client and always gets fast replies
+        """
+        args_text = " ".join(ctx.args) if ctx.args else ""
+        if not args_text:
+            await update.message.reply_text(
+                "Usage:\n/remember key=value\n/remember Ivan is my main client"
+            )
+            return
+        try:
+            from .memory import get_store
+            mem = get_store()
+            if "=" in args_text and " " not in args_text.split("=")[0]:
+                key, _, value = args_text.partition("=")
+                mem.set_profile(key.strip(), value.strip())
+                await update.message.reply_text(f"Profile updated: {key.strip()} = {value.strip()}")
+            else:
+                # Free-form fact -- store as "owner" subject
+                parts = args_text.split(" ", 2)
+                if len(parts) >= 3:
+                    subject, relation, value = parts[0], parts[1], " ".join(parts[2:])
+                else:
+                    subject, relation, value = "owner", "note", args_text
+                mem.add_fact(subject, relation, value, source="manual")
+                await update.message.reply_text(f"Remembered: {subject} {relation} {value}")
+        except Exception as exc:
+            await update.message.reply_text(f"Error: {exc}")
+
+    @owner_only(owner_id)
+    async def cmd_memory(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """/memory -- show what Hermes knows about you."""
+        try:
+            from .memory import get_store
+            mem = get_store()
+            profile = mem.all_profile()
+            facts = mem.recent_facts(limit=10)
+
+            lines = ["*What Hermes knows:*\n"]
+            if profile:
+                lines.append("*Profile:*")
+                for k, v in profile.items():
+                    lines.append(f"  {k}: {v}")
+            if facts:
+                lines.append("\n*Recent facts:*")
+                for f in facts:
+                    lines.append(f"  {f['subject']} {f['relation']} {f['value']}")
+            if not profile and not facts:
+                lines.append("Nothing stored yet. Chat normally and I'll learn over time.")
+            await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+        except Exception as exc:
+            await update.message.reply_text(f"Error: {exc}")
+
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("update", cmd_update))
     app.add_handler(CommandHandler("agent", cmd_agent))
+    app.add_handler(CommandHandler("remember", cmd_remember))
+    app.add_handler(CommandHandler("memory", cmd_memory))
     app.add_handler(CallbackQueryHandler(handle_callback_query))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))

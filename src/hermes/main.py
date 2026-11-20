@@ -11,6 +11,7 @@ from .telegram_bot import build_app
 from .dashboard.app import app as dashboard_app, configure as configure_dashboard
 from .mcp_server import configure as configure_mcp, build_mcp_router
 from .agents import AgentScheduler, DawnAgent, MiloAgent, get_store as get_approval_store
+from .memory import get_store as get_memory_store
 
 
 def setup_logging(level: str = "INFO") -> None:
@@ -27,6 +28,24 @@ async def main():
 
     log.info("Initializing database at %s", cfg.database.path)
     await init_db(cfg.database.path)
+
+    # Init memory store (must come before Router so context injection works)
+    memory = get_memory_store(cfg.database.path)
+    log.info("Memory store ready")
+
+    # Seed owner name from config if not already set
+    if not memory.get_profile("name"):
+        memory.set_profile("name", "Nikola")
+    if not memory.get_profile("timezone"):
+        tz = cfg.calendar.timezone if cfg.calendar else "Europe/Belgrade"
+        memory.set_profile("timezone", tz)
+
+    # Init Slack notifier if configured
+    if cfg.slack:
+        from .integrations.slack_notifier import init as init_slack
+        notifier = init_slack(cfg.slack.bot_token)
+        log.info("Slack notifier ready")
+
     router = Router(cfg)
     configure_dashboard(cfg.database.path, cfg, router)
     configure_mcp(cfg, router, cfg.database.path)

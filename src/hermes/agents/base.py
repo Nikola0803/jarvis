@@ -38,8 +38,8 @@ class HermesAgent:
 
     # ── Telegram helpers ──────────────────────────────────────────────────────
 
-    async def send(self, text: str, parse_mode: str = "HTML") -> None:
-        """Send a plain message to the owner."""
+    async def send(self, text: str, parse_mode: str = "HTML", slack: bool = True) -> None:
+        """Send to owner via Telegram, and also post to Slack ops channel."""
         try:
             await self._bot.bot.send_message(
                 chat_id=self._owner_id,
@@ -48,6 +48,18 @@ class HermesAgent:
             )
         except Exception as exc:
             self._log.error("send failed: %s", exc)
+
+        if slack:
+            try:
+                from ..integrations.slack_notifier import get_notifier
+                notifier = get_notifier()
+                if notifier:
+                    # Strip HTML tags for Slack (uses mrkdwn)
+                    import re
+                    plain = re.sub(r"<[^>]+>", "", text)
+                    await notifier.post(self.name, plain)
+            except Exception as exc:
+                self._log.debug("Slack post skipped: %s", exc)
 
     async def send_approval(
         self,

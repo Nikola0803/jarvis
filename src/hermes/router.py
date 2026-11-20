@@ -107,6 +107,17 @@ class Router:
         history = history or []
         messages = history + [{"role": "user", "content": text}]
 
+        # Inject memory context into system prompt
+        system = SYSTEM_PROMPT
+        try:
+            from .memory import get_store, build_context_prefix
+            mem = get_store()
+            context_prefix = build_context_prefix(mem, query=text)
+            if context_prefix:
+                system = context_prefix
+        except Exception:
+            pass
+
         provider_name = self._select_provider(text, history)
 
         # Enforce spend cap on Claude
@@ -117,12 +128,36 @@ class Router:
 
         provider = self._providers[provider_name]
         log.info("Routing to %s", provider_name)
-        response = await provider.complete(messages, system=SYSTEM_PROMPT, max_tokens=max_tokens)
+        response = await provider.complete(messages, system=system, max_tokens=max_tokens)
 
         # Fallback if provider errored
         if response.error and provider_name != self._cfg.free_fallback:
             log.warning("%s failed (%s), falling back to %s", provider_name, response.error, self._cfg.free_fallback)
             fallback = self._providers[self._cfg.free_fallback]
-            response = await fallback.complete(messages, system=SYSTEM_PROMPT, max_tokens=max_tokens)
+            response = await fallback.complete(messages, system=system, max_tokens=max_tokens)
+
+        # Extract and store facts from this exchange (async, non-blocking)
+        if response.text and not response.error:
+            try:
+                import asyncio
+                from .memory.extractor import extract_facts
+                from .memory import get_store
+                mem = get_store()
+                cheap = self._providers.get("deepseek") or self._providers.get(self._cfg.free_fallback)
+                if cheap:
+                    asyncio.create_task(self._store_facts(text, response.text, cheap, mem))
+            except Exception:
+                pass
 
         return response
+
+    async def _store_facts(self, user_text: str, reply: str, provider, mem) -> None:
+        try:
+            from .memory.extractor import extract_facts
+            extracted = await extract_facts(user_text, reply, provider)
+            for f in extracted.get("facts", []):
+                mem.add_fact(f["subject"], f["relation"], f["value"])
+            for k, v in extracted.get("profile_updates", {}).items():
+                mem.set_profile(k, v)
+        except Exception as exc:
+            log.debug("Fact storage failed: %s", exc)
