@@ -39,6 +39,12 @@ export default function MiraWorld() {
   const textInputRef = useRef(null);
   const vadRef = useRef(null);
   const sendVoiceAudioRef = useRef(null);
+  const isBusyRef = useRef(false);           // atomic flag: prevents concurrent voice requests
+  const speakCooldownRef = useRef(false);    // 1s cooldown after speaking: blocks echo re-trigger
+  const alertTimerRef = useRef(null);        // 30s alert mode timer
+  const interruptRef = useRef(null);         // fn() to stop current audio + resolve promise
+  const interruptedRef = useRef(false);      // set when interrupt fires; prevents idle reset
+  const [alertMode, setAlertMode] = useState(false);
   stateRef.current = state;
 
   async function fetchEmails() {
@@ -125,7 +131,18 @@ export default function MiraWorld() {
         model: "v5",
         startOnLoad: true,
         onSpeechStart: () => {
-          if (stateRef.current !== "idle") return;
+          if (stateRef.current === "speaking") {
+            // Voice interrupt: stop Z.E.R.O mid-sentence and start listening
+            interruptedRef.current = true;
+            interruptRef.current?.();
+            isBusyRef.current = true;
+            clearTimeout(alertTimerRef.current);
+            setState("listening");
+            return;
+          }
+          if (stateRef.current !== "idle" || isBusyRef.current || speakCooldownRef.current) return;
+          isBusyRef.current = true;
+          clearTimeout(alertTimerRef.current);
           unlockAudio();
           setState("listening");
         },
@@ -135,7 +152,10 @@ export default function MiraWorld() {
           if (sendVoiceAudioRef.current) sendVoiceAudioRef.current(float32ToWav(audio));
         },
         onVADMisfire: () => {
-          if (stateRef.current === "listening") setState("idle");
+          if (stateRef.current === "listening") {
+            isBusyRef.current = false;
+            setState("idle");
+          }
         },
       });
       vadRef.current = vad;
@@ -183,6 +203,7 @@ export default function MiraWorld() {
       };
 
       const done = () => {
+        interruptRef.current = null;
         isRealAudio.current = false;
         setVoiceEnergy("output", 0);
         URL.revokeObjectURL(url);
@@ -190,6 +211,7 @@ export default function MiraWorld() {
         audioCtxRef.current = null;
         resolve();
       };
+      interruptRef.current = () => { audio.pause(); done(); };
       audio.onended = done;
       audio.onerror = done;
       audio.play().catch(done);
@@ -205,10 +227,16 @@ export default function MiraWorld() {
       const audio = new Audio(url);
 
       const cleanup = () => {
+        interruptRef.current = null;
         isRealAudio.current = false;
         setVoiceEnergy("output", 0);
         URL.revokeObjectURL(url);
         resolve();
+      };
+      interruptRef.current = () => {
+        audio.pause();
+        try { ms.endOfStream(); } catch (_) {}
+        cleanup();
       };
 
       audio.onplay = () => {
@@ -265,7 +293,7 @@ export default function MiraWorld() {
   }
 
   async function sendVoiceAudio(blob) {
-    if (!blob || blob.size < 1000) { setState("idle"); return; }
+    if (!blob || blob.size < 1000) { setState("idle"); isBusyRef.current = false; return; }
     try {
       const form = new FormData();
       form.append("audio", blob, "voice.wav");
@@ -289,7 +317,19 @@ export default function MiraWorld() {
     } catch (err) {
       console.error("Z.E.R.O voice pipeline:", err);
     }
-    setState("idle");
+    if (interruptedRef.current) {
+      // Voice interrupt happened: state is already "listening", don't clobber it
+      interruptedRef.current = false;
+    } else {
+      // Natural end: cooldown prevents Z.E.R.O's own voice echo from re-triggering
+      speakCooldownRef.current = true;
+      setTimeout(() => { speakCooldownRef.current = false; }, 1000);
+      setAlertMode(true);
+      clearTimeout(alertTimerRef.current);
+      alertTimerRef.current = setTimeout(() => setAlertMode(false), 30000);
+      setState("idle");
+      isBusyRef.current = false;
+    }
   }
 
   // Keep ref up-to-date so the VAD closure (created once) always calls the latest version
@@ -326,12 +366,20 @@ export default function MiraWorld() {
     } catch (err) {
       console.error("Z.E.R.O text pipeline:", err);
     }
+    speakCooldownRef.current = true;
+    setTimeout(() => { speakCooldownRef.current = false; }, 1000);
+    setAlertMode(true);
+    clearTimeout(alertTimerRef.current);
+    alertTimerRef.current = setTimeout(() => setAlertMode(false), 30000);
     setState("idle");
   }
 
   function handleOrbTap() {
-    // Tap while speaking: interrupt playback and return to listening
+    // Tap while speaking: interrupt playback and return to idle
     if (stateRef.current === "speaking") {
+      isBusyRef.current = false;
+      interruptedRef.current = true;
+      interruptRef.current?.();
       isRealAudio.current = false;
       setVoiceEnergy("output", 0);
       setState("idle");
@@ -362,7 +410,7 @@ export default function MiraWorld() {
         </div>
       )}
 
-      <MiraStatusBar state={state} />
+      <MiraStatusBar state={state} alertMode={alertMode} />
 
       <button
         type="button"

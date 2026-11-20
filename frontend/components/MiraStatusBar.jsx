@@ -3,7 +3,8 @@ import LiveWaveform from "./LiveWaveform";
 const VIO = "#c084fc";
 const VIO_BRIGHT = "#ede9fe";
 function MiraStatusBar({
-  state = "idle"
+  state = "idle",
+  alertMode = false
 }) {
   const W = 420,
     H = 130;
@@ -54,7 +55,7 @@ function MiraStatusBar({
         {[0, 1, 2].map(i => <circle key={i} cx={cx + (i - 1) * 12} cy={cy + 62} r={2.5} fill={A} className={`orb-dot-blink blink-${i}`} />)}
 
         
-        {!isActive && <text x={cx} y={cy + 80} textAnchor="middle" fill={A} fontSize="9" fontFamily="'Share Tech Mono', monospace" letterSpacing="0.14em" opacity="0.32">{"ALWAYS LISTENING"}</text>}
+        {!isActive && <text x={cx} y={cy + 80} textAnchor="middle" fill={A} fontSize="9" fontFamily="'Share Tech Mono', monospace" letterSpacing="0.14em" opacity={alertMode ? 0.6 : 0.32}>{alertMode ? "ALERT" : "ALWAYS LISTENING"}</text>}
       </svg>
     </div>;
 }
