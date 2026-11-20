@@ -3,7 +3,7 @@ import io
 import logging
 from functools import wraps
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
 from .router import Router
 from .db.queries import log_message, get_monthly_spend
 
@@ -33,6 +33,8 @@ def build_app(
     anthropic_model: str = "claude-sonnet-4-5",
     gmail_cfg=None,
     calendar_cfg=None,
+    approval_store=None,
+    scheduler_ref: list | None = None,
 ) -> Application:
     if elevenlabs_api_key:
         from .voice import elevenlabs_provider
@@ -189,10 +191,96 @@ def build_app(
         )
         await update.message.reply_text(msg, parse_mode="Markdown")
 
+    @owner_only(owner_id)
+    async def handle_callback_query(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Handle approve/edit/skip buttons sent by agents."""
+        query = update.callback_query
+        await query.answer()
+
+        if not approval_store or not query.data:
+            return
+
+        try:
+            action, approval_id = query.data.split(":", 1)
+        except ValueError:
+            return
+
+        approval = approval_store.get(approval_id)
+        if not approval:
+            await query.edit_message_reply_markup(reply_markup=None)
+            await ctx.bot.send_message(chat_id=owner_id, text="Action expired or already resolved.")
+            return
+
+        approval_store.remove(approval_id)
+        await query.edit_message_reply_markup(reply_markup=None)
+
+        if action == "approve":
+            if approval.on_approve:
+                try:
+                    result = await approval.on_approve()
+                    await ctx.bot.send_message(
+                        chat_id=owner_id,
+                        text=f"<b>{approval.agent_name}:</b> {result or 'Done.'}",
+                        parse_mode="HTML",
+                    )
+                except Exception as exc:
+                    log.error("on_approve failed: %s", exc)
+                    await ctx.bot.send_message(chat_id=owner_id, text=f"Action failed: {exc}")
+            else:
+                await ctx.bot.send_message(chat_id=owner_id, text="Approved.")
+
+        elif action == "edit":
+            hint = approval.on_edit or "Reply with the edited version."
+            await ctx.bot.send_message(
+                chat_id=owner_id,
+                text=f"<b>Edit mode.</b> {hint}",
+                parse_mode="HTML",
+            )
+
+        elif action == "skip":
+            await ctx.bot.send_message(
+                chat_id=owner_id,
+                text=f"<b>{approval.agent_name}:</b> Skipped.",
+                parse_mode="HTML",
+            )
+
+    @owner_only(owner_id)
+    async def cmd_agent(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Manually trigger an agent: /agent dawn, /agent milo, /agent list"""
+        args = ctx.args
+        if not args:
+            await update.message.reply_text("Usage: /agent <name> or /agent list")
+            return
+
+        sub = args[0].lower()
+
+        sched = scheduler_ref[0] if scheduler_ref else None
+        if not sched:
+            await update.message.reply_text("Agent scheduler not running.")
+            return
+
+        if sub == "list":
+            names = [a.name for a in sched._agents]
+            await update.message.reply_text(
+                "Registered agents:\n" + "\n".join(f"  {n}" for n in names) if names else "No agents registered."
+            )
+            return
+
+        ok = await sched.trigger(sub)
+        if ok:
+            await update.message.reply_text(f"Triggered agent: {sub}")
+        else:
+            names = [a.name for a in sched._agents]
+            await update.message.reply_text(
+                f"Agent not found: {sub}\nAvailable: {', '.join(names)}"
+            )
+
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("update", cmd_update))
+    app.add_handler(CommandHandler("agent", cmd_agent))
+    app.add_handler(CallbackQueryHandler(handle_callback_query))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 

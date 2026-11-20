@@ -10,6 +10,7 @@ from .router import Router
 from .telegram_bot import build_app
 from .dashboard.app import app as dashboard_app, configure as configure_dashboard
 from .mcp_server import configure as configure_mcp, build_mcp_router
+from .agents import AgentScheduler, DawnAgent, MiloAgent, get_store as get_approval_store
 
 
 def setup_logging(level: str = "INFO") -> None:
@@ -65,6 +66,11 @@ async def main():
         await log_message(cfg.database.path, text, response)
         return response.text
 
+    # Build approval store (shared between agents and Telegram bot)
+    approval_store = get_approval_store()
+    # scheduler_ref is populated after Telegram app is built -- avoids chicken-and-egg
+    scheduler_ref: list = [None]
+
     tasks = []
 
     # Telegram (always required)
@@ -79,6 +85,8 @@ async def main():
         anthropic_model=cfg.anthropic.model if cfg.anthropic else "claude-sonnet-4-5",
         gmail_cfg=cfg.gmail if cfg.gmail else None,
         calendar_cfg=cfg.calendar if cfg.calendar else None,
+        approval_store=approval_store,
+        scheduler_ref=scheduler_ref,
     )
     await tg_app.initialize()
     await tg_app.start()
@@ -93,6 +101,20 @@ async def main():
         allowed_updates=["message", "callback_query"],
     )
     log.info("Telegram bot polling started")
+
+    # Agent scheduler -- Dawn (8am briefing) + Milo (8am + 4pm email triage)
+    user_tz = getattr(cfg, "timezone", None) or (cfg.calendar.timezone if cfg.calendar else "Europe/Belgrade")
+    scheduler = AgentScheduler(user_tz=user_tz)
+    for AgentClass in (DawnAgent, MiloAgent):
+        scheduler.register(AgentClass(
+            cfg=cfg,
+            bot=tg_app,
+            approval_store=approval_store,
+            db_path=cfg.database.path,
+        ))
+    scheduler_ref[0] = scheduler  # wire into the /agent command handler
+    scheduler.start()
+    log.info("Agent scheduler started (%s timezone)", user_tz)
 
     # WhatsApp (optional -- webhook via FastAPI)
     if cfg.whatsapp:
