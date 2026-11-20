@@ -63,7 +63,7 @@ async def synthesize_stream(text: str):
     """Async generator: yields MP3 chunks as they arrive from ElevenLabs (streaming TTS)."""
     if _client is None:
         raise RuntimeError("ElevenLabs not initialised -- missing API key")
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     q: asyncio.Queue[bytes | None] = asyncio.Queue()
 
     def _produce():

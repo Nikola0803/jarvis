@@ -115,16 +115,19 @@ async def api_voice(request: Request, audio: UploadFile = File(...)):
     reply_text = response.text
     transcript_text = text
 
-    async def _tts_stream():
-        try:
-            async for chunk in elevenlabs_provider.synthesize_stream(reply_text):
-                yield chunk
-        except Exception as exc:
-            log.error("voice: TTS stream error: %s", exc)
+    try:
+        audio_bytes = await elevenlabs_provider.synthesize(reply_text)
+    except Exception as exc:
+        log.error("voice: TTS failed: %s", exc)
+        return {"transcript": transcript_text, "reply": reply_text, "error": f"TTS failed: {exc}"}
 
-    log.info("voice: streaming TTS for reply len=%d", len(reply_text))
-    return StreamingResponse(
-        _tts_stream(),
+    if not audio_bytes:
+        log.warning("voice: TTS returned empty audio")
+        return {"transcript": transcript_text, "reply": reply_text, "error": "TTS returned empty audio"}
+
+    log.info("voice: returning %d bytes of audio", len(audio_bytes))
+    return Response(
+        content=audio_bytes,
         media_type="audio/mpeg",
         headers={
             "X-Transcript": _h(transcript_text[:200]),
@@ -135,7 +138,7 @@ async def api_voice(request: Request, audio: UploadFile = File(...)):
 
 @app.post("/api/chat")
 async def api_chat(request: Request):
-    """Text input endpoint: JSON {text} -> LLM -> streaming TTS out."""
+    """Text input endpoint: JSON {text} -> LLM -> streaming TTS out (or JSON fallback)."""
     import logging
     log = logging.getLogger("hermes.chat")
 
@@ -171,15 +174,40 @@ async def api_chat(request: Request):
 
     reply_text = response.text
 
-    async def _tts_stream():
-        try:
-            async for chunk in elevenlabs_provider.synthesize_stream(reply_text):
-                yield chunk
-        except Exception as exc:
-            log.error("chat: TTS stream error: %s", exc)
+    # If ElevenLabs is not configured, return JSON so the HUD can show the text reply
+    if not elevenlabs_provider.is_ready():
+        log.info("chat: TTS not ready, returning text reply")
+        import json
+        return Response(
+            content=json.dumps({"reply": reply_text}),
+            media_type="application/json",
+            headers={"X-Reply": _h(reply_text[:200])},
+        )
 
-    return StreamingResponse(
-        _tts_stream(),
+    # Collect TTS audio; fall back to JSON on failure
+    try:
+        audio_bytes = await elevenlabs_provider.synthesize(reply_text)
+    except Exception as exc:
+        log.error("chat: TTS failed: %s", exc)
+        import json
+        return Response(
+            content=json.dumps({"reply": reply_text, "error": f"TTS failed: {exc}"}),
+            media_type="application/json",
+            headers={"X-Reply": _h(reply_text[:200])},
+        )
+
+    if not audio_bytes:
+        log.warning("chat: TTS returned empty audio, sending text reply")
+        import json
+        return Response(
+            content=json.dumps({"reply": reply_text, "error": "TTS returned empty audio"}),
+            media_type="application/json",
+            headers={"X-Reply": _h(reply_text[:200])},
+        )
+
+    log.info("chat: returning %d bytes of audio", len(audio_bytes))
+    return Response(
+        content=audio_bytes,
         media_type="audio/mpeg",
         headers={
             "X-Transcript": _h(text[:200]),
