@@ -40,7 +40,6 @@ export default function LoginPage() {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { background: #06030d; }
         .wrap {
