@@ -120,10 +120,16 @@ export default function MiraWorld() {
       return new Blob([buf], { type: "audio/wav" });
     }
 
-    import("@ricky0123/vad-web").then(async ({ MicVAD, ort }) => {
-      // Single-threaded: no SharedArrayBuffer / COOP-COEP headers needed
-      ort.env.wasm.numThreads = 1;
-      ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.31.1/dist/";
+    import("@ricky0123/vad-web").then(async (vadMod) => {
+      const { MicVAD } = vadMod;
+      // ort may not be re-exported in all vad-web versions; guard before use
+      try {
+        const ort = vadMod.ort;
+        if (ort?.env?.wasm) {
+          ort.env.wasm.numThreads = 1;
+          ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.31.1/dist/";
+        }
+      } catch (_) {}
 
       vad = await MicVAD.new({
         baseAssetPath: "/",
