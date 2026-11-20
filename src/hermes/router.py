@@ -1,7 +1,7 @@
 from __future__ import annotations
 import logging
 from .config import RouterConfig, Config
-from .llm import ClaudeProvider, DeepSeekProvider, GeminiProvider, LLMResponse
+from .llm import ClaudeProvider, DeepSeekProvider, GeminiProvider, OpenAICompatProvider, LLMResponse
 
 log = logging.getLogger(__name__)
 
@@ -39,10 +39,27 @@ class Router:
         }
         if cfg.gemini:
             self._providers["gemini"] = GeminiProvider(cfg.gemini.api_key, cfg.gemini.model)
+
+        if cfg.groq:
+            self._providers["groq"] = OpenAICompatProvider(
+                api_key=cfg.groq.api_key,
+                model=cfg.groq.model,
+                base_url=cfg.groq.base_url,
+                provider_name="groq",
+                input_price_per_1m=0.05,   # Groq free tier -- effectively $0, placeholder
+                output_price_per_1m=0.08,
+            )
+
+        # Determine best free-tier provider (prefer Groq -- faster than Gemini)
+        if "groq" in self._providers:
+            free = "groq"
+        elif "gemini" in self._providers:
+            free = "gemini"
         else:
-            # No Gemini key -- reroute free tier and fallback to deepseek
+            free = "deepseek"
+        if free != self._cfg.free_fallback:
             self._cfg = RouterConfig(
-                **{**self._cfg.model_dump(), "free_fallback": "deepseek"}
+                **{**self._cfg.model_dump(), "free_fallback": free}
             )
 
     def _select_provider(self, text: str, history: list[dict]) -> str:

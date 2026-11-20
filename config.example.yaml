@@ -63,6 +63,20 @@ gemini:
   api_key: "..."
   model: "gemini-2.0-flash"     # free tier: 15 req/min, 1M tok/day
 
+# Groq -- ultra-fast free inference on open-source models.
+# Get a free key at console.groq.com.
+# Recommended models:
+#   llama-3.1-8b-instant          -- fastest, free, used for simple quick replies
+#   llama-3.3-70b-versatile       -- best quality on Groq free tier
+#   nous-hermes-2-pro-llama-3-1-8b -- NousResearch Hermes (check Groq dashboard for availability)
+#
+# To use NousResearch Hermes via Together AI instead:
+#   base_url: "https://api.together.xyz/v1/chat/completions"
+#   model: "NousResearch/Hermes-3-Llama-3.1-70B-Turbo"
+groq:
+  api_key: "gsk_..."
+  model: "llama-3.1-8b-instant"
+
 router:
   default_provider: "deepseek"
   complex_provider: "claude"

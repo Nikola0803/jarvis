@@ -68,6 +68,19 @@ class GeminiConfig(BaseModel):
     model: str = "gemini-2.0-flash"
 
 
+class GroqConfig(BaseModel):
+    api_key: str
+    # Groq free tier -- fast inference on open-source models.
+    # NousResearch Hermes on Groq: nous-hermes-2-pro-llama-3-1-8b (if available)
+    # Fastest free option: llama-3.1-8b-instant
+    # Best free option:    llama-3.3-70b-versatile
+    model: str = "llama-3.1-8b-instant"
+    # Override base_url to use Together AI or any other OpenAI-compat endpoint.
+    # Together AI (NousResearch Hermes): https://api.together.xyz/v1/chat/completions
+    #   model: NousResearch/Hermes-3-Llama-3.1-70B-Turbo
+    base_url: str = "https://api.groq.com/openai/v1/chat/completions"
+
+
 class RouterConfig(BaseModel):
     default_provider: str = "deepseek"
     complex_provider: str = "claude"
@@ -104,6 +117,7 @@ class Config(BaseModel):
     anthropic: AnthropicConfig
     deepseek: DeepSeekConfig
     gemini: Optional[GeminiConfig] = None
+    groq: Optional[GroqConfig] = None
     elevenlabs: Optional[ElevenLabsConfig] = None
     router: RouterConfig = RouterConfig()
     database: DatabaseConfig = DatabaseConfig()
