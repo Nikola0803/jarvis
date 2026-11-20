@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 from typing import Optional, List
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class TelegramConfig(BaseModel):
@@ -39,6 +39,19 @@ class CalendarConfig(BaseModel):
     timezone: str = "Europe/Belgrade"
 
 
+class GmailAccountConfig(BaseModel):
+    name: str = "primary"
+    email: str = ""
+    token_file: str = "/home/hermes/.hermes/gmail_token_primary.json"
+    priority: str = "medium"  # high / medium / low
+
+
+class GmailConfig(BaseModel):
+    credentials_file: str = "/etc/hermes/google_credentials.json"
+    accounts: List[GmailAccountConfig] = Field(default_factory=list)
+    max_unread_shown: int = 10
+
+
 class AnthropicConfig(BaseModel):
     api_key: str
     model: str = "claude-sonnet-4-5"
@@ -52,17 +65,36 @@ class DeepSeekConfig(BaseModel):
 
 class GeminiConfig(BaseModel):
     api_key: str
-    model: str = "gemini-2.0-flash"
+    model: str = "gemini-3.8-flash"
+
+
+class GroqConfig(BaseModel):
+    api_key: str
+    # Groq free tier -- fast inference on open-source models.
+    # NousResearch Hermes on Groq: nous-hermes-2-pro-llama-3-1-8b (if available)
+    # Fastest free option: llama-3.1-8b-instant
+    # Best free option:    llama-3.3-70b-versatile
+    model: str = "llama-3.1-8b-instant"
+    # Override base_url to use Together AI or any other OpenAI-compat endpoint.
+    # Together AI (NousResearch Hermes): https://api.together.xyz/v1/chat/completions
+    #   model: NousResearch/Hermes-3-Llama-3.1-70B-Turbo
+    base_url: str = "https://api.groq.com/openai/v1/chat/completions"
 
 
 class RouterConfig(BaseModel):
     default_provider: str = "deepseek"
     complex_provider: str = "claude"
     free_fallback: str = "gemini"
+    free_tier_max_words: int = 8        # messages at or under this word count go to Gemini first
     short_message_max_tokens: int = 150
     claude_trigger_prefixes: list[str] = Field(
         default=["/code", "/analyze", "/plan", "/think", "/research"]
     )
+
+
+class ElevenLabsConfig(BaseModel):
+    api_key: str
+    voice_id: str = "21m00Tcm4TlvDq8ikWAM"  # Rachel -- swap to any ElevenLabs voice ID
 
 
 class DatabaseConfig(BaseModel):
@@ -81,9 +113,12 @@ class Config(BaseModel):
     discord: Optional[DiscordConfig] = None
     slack: Optional[SlackConfig] = None
     calendar: Optional[CalendarConfig] = None
+    gmail: Optional[GmailConfig] = None
     anthropic: AnthropicConfig
     deepseek: DeepSeekConfig
-    gemini: GeminiConfig
+    gemini: Optional[GeminiConfig] = None
+    groq: Optional[GroqConfig] = None
+    elevenlabs: Optional[ElevenLabsConfig] = None
     router: RouterConfig = RouterConfig()
     database: DatabaseConfig = DatabaseConfig()
     dashboard: DashboardConfig = DashboardConfig()
