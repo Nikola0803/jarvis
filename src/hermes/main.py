@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uvicorn
+from fastapi import Request
 from .config import load_config
 from .db.models import init_db
 from .db.queries import log_message
@@ -159,7 +160,6 @@ async def main():
         result = sl_build(cfg.slack.bot_token, cfg.slack.signing_secret)
         if result[0]:
             sl_app, sl_handler = result
-            from fastapi import Request
             @dashboard_app.post("/webhook/slack")
             async def slack_events(req: Request):
                 return await sl_handler.handle(req)
