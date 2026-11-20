@@ -60,6 +60,23 @@ def build_mcp_router():
         log.warning("mcp package not installed -- MCP server disabled. Run: pip install mcp")
         return None
 
+    try:
+        return _build_mcp_router_inner()
+    except Exception as exc:
+        log.warning(
+            "MCP server disabled (API mismatch or build error): %s\n"
+            "To debug: source /opt/jarvis/venv/bin/activate && "
+            "python3 -c \"from mcp.server import Server; s=Server('t'); "
+            "print([m for m in dir(s) if not m.startswith('_')])\"",
+            exc,
+        )
+        return None
+
+
+def _build_mcp_router_inner():
+    from mcp.server import Server
+    from mcp.server.sse import SseServerTransport
+    from mcp import types
     from fastapi import APIRouter, Request, HTTPException
 
     mcp_server = Server("hermes-jarvis")
