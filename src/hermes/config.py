@@ -65,7 +65,7 @@ class DeepSeekConfig(BaseModel):
 
 class GeminiConfig(BaseModel):
     api_key: str
-    model: str = "gemini-2.5-flash"
+    model: str = "gemini-3.8-flash"
 
 
 class GroqConfig(BaseModel):
