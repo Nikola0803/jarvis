@@ -16,7 +16,6 @@ export async function POST(req: NextRequest) {
     body: formData,
   });
 
-  const body = await res.arrayBuffer();
   const responseHeaders = new Headers();
 
   // Forward audio content type and custom headers
@@ -27,5 +26,6 @@ export async function POST(req: NextRequest) {
   const xTranscript = res.headers.get("x-transcript");
   if (xTranscript) responseHeaders.set("x-transcript", xTranscript);
 
-  return new NextResponse(body, { status: res.status, headers: responseHeaders });
+  // Pipe the body stream directly -- no buffering, audio starts playing sooner
+  return new NextResponse(res.body, { status: res.status, headers: responseHeaders });
 }

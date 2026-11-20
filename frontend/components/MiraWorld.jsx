@@ -109,6 +109,74 @@ export default function MiraWorld() {
     });
   }
 
+  // Streaming playback via MediaSource Extensions -- starts playing as soon as first
+  // MP3 chunks arrive, before the full TTS response is complete.
+  async function playStreamingAudio(res) {
+    return new Promise((resolve) => {
+      const ms = new MediaSource();
+      const url = URL.createObjectURL(ms);
+      const audio = new Audio(url);
+
+      const cleanup = () => {
+        isRealAudio.current = false;
+        setVoiceEnergy("output", 0);
+        URL.revokeObjectURL(url);
+        resolve();
+      };
+
+      audio.onplay = () => {
+        isRealAudio.current = true;
+        setState("speaking");
+      };
+      audio.onended = cleanup;
+      audio.onerror = cleanup;
+
+      ms.addEventListener("sourceopen", async () => {
+        let sb;
+        try {
+          sb = ms.addSourceBuffer("audio/mpeg");
+          sb.mode = "sequence";
+        } catch (_) {
+          cleanup();
+          return;
+        }
+
+        const appendChunk = (chunk) =>
+          new Promise((res) => {
+            if (sb.updating) {
+              sb.addEventListener("updateend", res, { once: true });
+            } else {
+              res();
+            }
+          }).then(() => {
+            sb.appendBuffer(chunk);
+            return new Promise((r) => sb.addEventListener("updateend", r, { once: true }));
+          });
+
+        audio.play().catch(cleanup);
+
+        try {
+          const reader = res.body.getReader();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+              if (!sb.updating) {
+                try { ms.endOfStream(); } catch (_) {}
+              } else {
+                sb.addEventListener("updateend", () => { try { ms.endOfStream(); } catch (_) {} }, { once: true });
+              }
+              break;
+            }
+            await appendChunk(value);
+          }
+        } catch (_) {
+          try { ms.endOfStream("network"); } catch (_) {}
+          cleanup();
+        }
+      });
+    });
+  }
+
   async function handleOrbTap() {
     const s = stateRef.current;
 
@@ -149,10 +217,14 @@ export default function MiraWorld() {
         if (res.ok && res.headers.get("content-type")?.includes("audio")) {
           const reply = res.headers.get("X-Reply");
           if (reply) { setReplyText(reply); clearTimeout(replyTimer.current); replyTimer.current = setTimeout(() => setReplyText(""), 10000); }
-          const buf = await res.arrayBuffer();
-          const mp3 = new Blob([buf], { type: "audio/mpeg" });
-          console.log("Z.E.R.O audio:", mp3.size, "bytes, type:", mp3.type);
-          await playAudio(mp3);
+          const canStream = typeof window.MediaSource !== "undefined" && MediaSource.isTypeSupported("audio/mpeg");
+          if (canStream) {
+            await playStreamingAudio(res);
+          } else {
+            const buf = await res.arrayBuffer();
+            const mp3 = new Blob([buf], { type: "audio/mpeg" });
+            await playAudio(mp3);
+          }
           setReplyText("");
         } else {
           const err = await res.json().catch(() => ({}));

@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from datetime import datetime, timezone
 from fastapi import FastAPI, Request, UploadFile, File
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from ..db.queries import get_recent_messages, get_monthly_spend
 
@@ -109,16 +109,28 @@ async def api_voice(request: Request, audio: UploadFile = File(...)):
         log.error("voice: LLM returned empty text, error=%s", response.error)
         return {"transcript": text, "reply": "I had a brain freeze -- check the logs.", "error": f"LLM empty: {response.error}"}
 
-    try:
-        mp3_bytes = await elevenlabs_provider.synthesize(response.text)
-        log.info("voice: TTS => %d bytes", len(mp3_bytes))
-        def _h(s: str) -> str:
-            return s.encode("ascii", errors="replace").decode("ascii")
-        return Response(content=mp3_bytes, media_type="audio/mpeg",
-                        headers={"X-Transcript": _h(text[:200]), "X-Reply": _h(response.text[:200])})
-    except Exception as exc:
-        log.error("voice: TTS failed: %s", exc)
-        return {"transcript": text, "reply": response.text, "error": f"TTS failed: {exc}"}
+    def _h(s: str) -> str:
+        return s.encode("ascii", errors="replace").decode("ascii")
+
+    reply_text = response.text
+    transcript_text = text
+
+    async def _tts_stream():
+        try:
+            async for chunk in elevenlabs_provider.synthesize_stream(reply_text):
+                yield chunk
+        except Exception as exc:
+            log.error("voice: TTS stream error: %s", exc)
+
+    log.info("voice: streaming TTS for reply len=%d", len(reply_text))
+    return StreamingResponse(
+        _tts_stream(),
+        media_type="audio/mpeg",
+        headers={
+            "X-Transcript": _h(transcript_text[:200]),
+            "X-Reply": _h(reply_text[:200]),
+        },
+    )
 
 
 @app.get("/api/live")

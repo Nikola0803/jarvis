@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import threading
 from elevenlabs import ElevenLabs
 
 log = logging.getLogger(__name__)
@@ -56,3 +57,33 @@ async def synthesize(text: str) -> bytes:
     if _client is None:
         raise RuntimeError("ElevenLabs not initialised -- missing API key")
     return await asyncio.to_thread(_synthesize_sync, text)
+
+
+async def synthesize_stream(text: str):
+    """Async generator: yields MP3 chunks as they arrive from ElevenLabs (streaming TTS)."""
+    if _client is None:
+        raise RuntimeError("ElevenLabs not initialised -- missing API key")
+    loop = asyncio.get_event_loop()
+    q: asyncio.Queue[bytes | None] = asyncio.Queue()
+
+    def _produce():
+        try:
+            for chunk in _client.text_to_speech.convert(
+                text=text,
+                voice_id=_voice_id,
+                model_id=TTS_MODEL,
+                output_format="mp3_44100_128",
+            ):
+                if chunk:
+                    loop.call_soon_threadsafe(q.put_nowait, chunk)
+        except Exception as exc:
+            log.error("TTS stream error: %s", exc)
+        finally:
+            loop.call_soon_threadsafe(q.put_nowait, None)
+
+    threading.Thread(target=_produce, daemon=True).start()
+    while True:
+        chunk = await q.get()
+        if chunk is None:
+            break
+        yield chunk
