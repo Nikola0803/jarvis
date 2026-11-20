@@ -9,6 +9,7 @@ from .db.queries import log_message
 from .router import Router
 from .telegram_bot import build_app
 from .dashboard.app import app as dashboard_app, configure as configure_dashboard
+from .mcp_server import configure as configure_mcp, build_mcp_router
 
 
 def setup_logging(level: str = "INFO") -> None:
@@ -27,6 +28,13 @@ async def main():
     await init_db(cfg.database.path)
     router = Router(cfg)
     configure_dashboard(cfg.database.path, cfg, router)
+    configure_mcp(cfg, router, cfg.database.path)
+
+    # Mount MCP server if the mcp package is installed
+    mcp_router = build_mcp_router()
+    if mcp_router:
+        dashboard_app.include_router(mcp_router)
+        log.info("MCP server mounted at /mcp/sse + /mcp/messages/")
 
     async def handle_message(platform: str, user_id: str, text: str) -> str:
         """Unified handler called by every platform adapter."""
@@ -42,6 +50,15 @@ async def main():
                 if cal_reply is not None:
                     await log_message(cfg.database.path, text, type("R", (), {"text": cal_reply, "provider": "calendar", "tokens_used": 0, "cost_usd": 0.0, "error": None})())
                     return cal_reply
+
+        # Gmail intent intercept (before LLM)
+        if cfg.gmail:
+            from .integrations.gmail_commands import is_mail_intent, handle as mail_handle
+            if is_mail_intent(text):
+                mail_reply = await mail_handle(text, cfg.gmail)
+                if mail_reply is not None:
+                    await log_message(cfg.database.path, text, type("R", (), {"text": mail_reply, "provider": "gmail", "tokens_used": 0, "cost_usd": 0.0, "error": None})())
+                    return mail_reply
 
         history = []
         response = await router.route(text, history)
@@ -60,10 +77,21 @@ async def main():
         elevenlabs_voice_id=cfg.elevenlabs.voice_id if cfg.elevenlabs else None,
         anthropic_api_key=cfg.anthropic.api_key if cfg.anthropic else None,
         anthropic_model=cfg.anthropic.model if cfg.anthropic else "claude-sonnet-4-5",
+        gmail_cfg=cfg.gmail if cfg.gmail else None,
+        calendar_cfg=cfg.calendar if cfg.calendar else None,
     )
     await tg_app.initialize()
     await tg_app.start()
-    await tg_app.updater.start_polling(drop_pending_updates=True)
+    # Drop pending updates and use a generous timeout to avoid 409 Conflict when
+    # the previous process's long-poll connection is still alive on Telegram's side.
+    await tg_app.updater.start_polling(
+        drop_pending_updates=True,
+        read_timeout=30,
+        write_timeout=30,
+        connect_timeout=30,
+        pool_timeout=30,
+        allowed_updates=["message", "callback_query"],
+    )
     log.info("Telegram bot polling started")
 
     # WhatsApp (optional -- webhook via FastAPI)

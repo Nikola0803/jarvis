@@ -26,8 +26,12 @@ export default function MiraWorld() {
   const [reducedMotion, setReducedMotion] = useState(false);
   const [dialOpen, setDialOpen] = useState(false);
   const [textOpen, setTextOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
   const [textInput, setTextInput] = useState("");
   const [replyText, setReplyText] = useState("");
+  const [emails, setEmails] = useState(null);
+  const [calendar, setCalendar] = useState(null);
+  const [infoTab, setInfoTab] = useState("mail"); // "mail" | "cal"
   const stateRef = useRef(state);
   const isRealAudio = useRef(false);
   const recorderRef = useRef(null);
@@ -36,6 +40,27 @@ export default function MiraWorld() {
   const audioCtxRef = useRef(null);
   const textInputRef = useRef(null);
   stateRef.current = state;
+
+  async function fetchEmails() {
+    try {
+      const res = await fetch("/api/jarvis/emails?account=all&limit=8&unread_only=true");
+      if (res.ok) setEmails(await res.json());
+    } catch (_) {}
+  }
+
+  async function fetchCalendar() {
+    try {
+      const res = await fetch("/api/jarvis/calendar?hours=24");
+      if (res.ok) setCalendar(await res.json());
+    } catch (_) {}
+  }
+
+  function openInfo(tab) {
+    setInfoTab(tab);
+    setInfoOpen(true);
+    if (tab === "mail") fetchEmails();
+    else fetchCalendar();
+  }
 
   function unlockAudio() {
     try {
@@ -322,6 +347,32 @@ export default function MiraWorld() {
           <div style={{ position: "fixed", bottom: 24, right: 24, zIndex: 50, display: "flex", gap: 8, alignItems: "center" }}>
             <button
               type="button"
+              onClick={() => openInfo("mail")}
+              aria-label="Check emails"
+              title="Inbox"
+              style={{
+                background: infoOpen && infoTab === "mail" ? "rgba(109,40,217,0.6)" : "rgba(14,8,26,0.7)",
+                border: "1px solid rgba(167,139,250,0.25)",
+                borderRadius: 10, padding: "7px 10px", cursor: "pointer",
+                color: "rgba(167,139,250,0.8)", fontSize: 14, lineHeight: 1,
+                backdropFilter: "blur(12px)",
+              }}
+            >✉</button>
+            <button
+              type="button"
+              onClick={() => openInfo("cal")}
+              aria-label="Check calendar"
+              title="Today"
+              style={{
+                background: infoOpen && infoTab === "cal" ? "rgba(109,40,217,0.6)" : "rgba(14,8,26,0.7)",
+                border: "1px solid rgba(167,139,250,0.25)",
+                borderRadius: 10, padding: "7px 10px", cursor: "pointer",
+                color: "rgba(167,139,250,0.8)", fontSize: 14, lineHeight: 1,
+                backdropFilter: "blur(12px)",
+              }}
+            >📅</button>
+            <button
+              type="button"
               onClick={() => { setTextOpen((v) => !v); setTimeout(() => textInputRef.current?.focus(), 50); }}
               aria-label="Toggle text input"
               title="Type to Jarvis"
@@ -385,6 +436,162 @@ export default function MiraWorld() {
           <div style={{ fontFamily: "var(--font-ui)", fontSize: 13, lineHeight: 1.55, color: "rgba(240,237,232,0.9)" }}>{replyText}</div>
         </div>
       )}
+
+      {infoOpen && (
+        <div style={{
+          position: "fixed", top: "50%", left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: "min(560px, 94vw)", maxHeight: "70vh",
+          zIndex: 60,
+          background: "rgba(10,6,20,0.97)", border: "1px solid rgba(167,139,250,0.3)",
+          borderRadius: 18, display: "flex", flexDirection: "column",
+          backdropFilter: "blur(24px)", overflow: "hidden",
+        }}>
+          {/* Header */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 16px", borderBottom: "1px solid rgba(167,139,250,0.12)" }}>
+            <button
+              type="button"
+              onClick={() => { setInfoTab("mail"); fetchEmails(); }}
+              style={{
+                background: infoTab === "mail" ? "rgba(109,40,217,0.5)" : "transparent",
+                border: "1px solid rgba(167,139,250,0.2)", borderRadius: 8,
+                padding: "5px 12px", color: "rgba(167,139,250,0.9)", fontSize: 12, cursor: "pointer",
+              }}
+            >✉ Mail</button>
+            <button
+              type="button"
+              onClick={() => { setInfoTab("cal"); fetchCalendar(); }}
+              style={{
+                background: infoTab === "cal" ? "rgba(109,40,217,0.5)" : "transparent",
+                border: "1px solid rgba(167,139,250,0.2)", borderRadius: 8,
+                padding: "5px 12px", color: "rgba(167,139,250,0.9)", fontSize: 12, cursor: "pointer",
+              }}
+            >📅 Today</button>
+            <div style={{ flex: 1 }} />
+            <button
+              type="button"
+              onClick={() => setInfoOpen(false)}
+              style={{ background: "none", border: "none", color: "rgba(167,139,250,0.5)", fontSize: 18, cursor: "pointer", lineHeight: 1 }}
+            >×</button>
+          </div>
+
+          {/* Body */}
+          <div style={{ overflow: "auto", flex: 1, padding: "12px 16px" }}>
+            {infoTab === "mail" && (
+              <MailPanel emails={emails} onReload={fetchEmails} onAsk={(q) => {
+                setInfoOpen(false);
+                setTextInput(q);
+                setTextOpen(true);
+                setTimeout(() => textInputRef.current?.focus(), 50);
+              }} />
+            )}
+            {infoTab === "cal" && (
+              <CalPanel calendar={calendar} onReload={fetchCalendar} />
+            )}
+          </div>
+        </div>
+      )}
     </>
+  );
+}
+
+function MailPanel({ emails, onReload, onAsk }) {
+  if (!emails) return <div style={{ color: "rgba(167,139,250,0.4)", fontSize: 12, textAlign: "center", padding: "24px 0" }}>Loading...</div>;
+
+  const hasError = Object.values(emails).every(v => v?.error);
+  if (hasError) {
+    const firstErr = Object.values(emails)[0]?.error;
+    if (firstErr === "not_authenticated") {
+      return (
+        <div style={{ color: "rgba(240,237,232,0.6)", fontSize: 12, padding: "12px 0" }}>
+          <div style={{ color: "#a78bfa", marginBottom: 8 }}>Gmail not authenticated</div>
+          <div>Send <code style={{ color: "#c4b5fd" }}>/mail auth paywise</code> via Telegram to authorize each account.</div>
+        </div>
+      );
+    }
+  }
+
+  const allMsgs = [];
+  for (const [acct, msgs] of Object.entries(emails)) {
+    if (Array.isArray(msgs)) {
+      msgs.forEach(m => allMsgs.push({ ...m, _acct: acct }));
+    }
+  }
+  allMsgs.sort((a, b) => {
+    const pa = { high: 0, medium: 1, low: 2 }[a.priority] ?? 1;
+    const pb = { high: 0, medium: 1, low: 2 }[b.priority] ?? 1;
+    return pa - pb;
+  });
+
+  if (!allMsgs.length) return (
+    <div style={{ color: "rgba(167,139,250,0.4)", fontSize: 12, textAlign: "center", padding: "24px 0" }}>
+      No unread emails.
+      <button onClick={onReload} style={{ display: "block", margin: "8px auto 0", background: "none", border: "none", color: "#a78bfa", fontSize: 11, cursor: "pointer" }}>Refresh</button>
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      {allMsgs.map((m) => (
+        <div key={m.id} style={{
+          padding: "8px 10px", borderRadius: 8,
+          background: "rgba(167,139,250,0.04)", border: "1px solid rgba(167,139,250,0.08)",
+          cursor: "pointer",
+        }}
+          onClick={() => onAsk(`/mail read ${m.id}`)}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+            <span style={{ fontSize: 11, color: m.priority === "high" ? "#f472b6" : "#a78bfa", fontFamily: "var(--font-mono)", letterSpacing: "0.1em" }}>
+              {m._acct}{m.priority === "high" ? " !" : ""}
+            </span>
+            <span style={{ fontSize: 10, color: "rgba(167,139,250,0.4)" }}>{m.date ? new Date(m.date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}</span>
+          </div>
+          <div style={{ fontSize: 12, color: "rgba(240,237,232,0.5)", marginBottom: 2 }}>
+            {(m.from || "").split("<")[0].trim()}
+          </div>
+          <div style={{ fontSize: 12, color: "rgba(240,237,232,0.85)", fontWeight: 500, marginBottom: 2 }}>{m.subject || "(no subject)"}</div>
+          <div style={{ fontSize: 11, color: "rgba(167,139,250,0.5)", lineHeight: 1.4 }}>{(m.snippet || "").slice(0, 90)}</div>
+        </div>
+      ))}
+      <button onClick={onReload} style={{ marginTop: 4, background: "none", border: "none", color: "rgba(167,139,250,0.4)", fontSize: 11, cursor: "pointer", textAlign: "left" }}>Refresh</button>
+    </div>
+  );
+}
+
+function CalPanel({ calendar, onReload }) {
+  if (!calendar) return <div style={{ color: "rgba(167,139,250,0.4)", fontSize: 12, textAlign: "center", padding: "24px 0" }}>Loading...</div>;
+
+  const events = [];
+  for (const [acct, evts] of Object.entries(calendar)) {
+    if (Array.isArray(evts)) evts.forEach(e => events.push({ ...e, _acct: acct }));
+  }
+  events.sort((a, b) => (a.start || "").localeCompare(b.start || ""));
+
+  if (!events.length) return (
+    <div style={{ color: "rgba(167,139,250,0.4)", fontSize: 12, textAlign: "center", padding: "24px 0" }}>
+      Nothing on the calendar today.
+      <button onClick={onReload} style={{ display: "block", margin: "8px auto 0", background: "none", border: "none", color: "#a78bfa", fontSize: 11, cursor: "pointer" }}>Refresh</button>
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      {events.map((e, i) => (
+        <div key={e.id || i} style={{
+          padding: "8px 10px", borderRadius: 8,
+          background: "rgba(167,139,250,0.04)", border: "1px solid rgba(167,139,250,0.08)",
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+            <span style={{ fontSize: 11, color: "#a78bfa", fontFamily: "var(--font-mono)" }}>{e._acct}</span>
+            <span style={{ fontSize: 11, color: "rgba(167,139,250,0.5)" }}>
+              {e.start ? new Date(e.start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "all day"}
+            </span>
+          </div>
+          <div style={{ fontSize: 13, color: "rgba(240,237,232,0.9)", fontWeight: 500 }}>{e.title}</div>
+          {e.location && <div style={{ fontSize: 11, color: "rgba(167,139,250,0.5)", marginTop: 2 }}>{e.location}</div>}
+        </div>
+      ))}
+      <button onClick={onReload} style={{ marginTop: 4, background: "none", border: "none", color: "rgba(167,139,250,0.4)", fontSize: 11, cursor: "pointer", textAlign: "left" }}>Refresh</button>
+    </div>
   );
 }

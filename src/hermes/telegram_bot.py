@@ -31,6 +31,8 @@ def build_app(
     elevenlabs_voice_id: str | None = None,
     anthropic_api_key: str | None = None,
     anthropic_model: str = "claude-sonnet-4-5",
+    gmail_cfg=None,
+    calendar_cfg=None,
 ) -> Application:
     if elevenlabs_api_key:
         from .voice import elevenlabs_provider
@@ -45,6 +47,24 @@ def build_app(
     async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         text = update.message.text or ""
         await update.message.chat.send_action("typing")
+
+        # Gmail intent intercept
+        if gmail_cfg:
+            from .integrations.gmail_commands import is_mail_intent, handle as mail_handle
+            if is_mail_intent(text):
+                mail_reply = await mail_handle(text, gmail_cfg)
+                if mail_reply is not None:
+                    await update.message.reply_text(mail_reply)
+                    return
+
+        # Calendar intent intercept
+        if calendar_cfg:
+            from .integrations.calendar_commands import is_calendar_intent, handle as cal_handle
+            if is_calendar_intent(text):
+                cal_reply = await cal_handle(text, calendar_cfg)
+                if cal_reply is not None:
+                    await update.message.reply_text(cal_reply)
+                    return
 
         history = ctx.chat_data.get("history", [])
         response = await router.route(text, history, max_tokens=300)

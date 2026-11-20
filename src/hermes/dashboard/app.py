@@ -188,6 +188,96 @@ async def api_chat(request: Request):
     )
 
 
+@app.get("/api/emails")
+async def api_emails(request: Request, account: str = "all", limit: int = 10, unread_only: bool = True):
+    """Read emails from configured Gmail accounts."""
+    import logging
+    log = logging.getLogger("hermes.emails")
+
+    if _cfg and hasattr(_cfg, "dashboard"):
+        secret = getattr(_cfg.dashboard, "secret_key", "")
+        if secret and secret not in ("change-me", "your-secret-here"):
+            if request.headers.get("x-jarvis-token", "") != secret:
+                return Response(status_code=401, content='{"error":"unauthorized"}',
+                                media_type="application/json")
+
+    if not _cfg or not getattr(_cfg, "gmail", None):
+        return {"error": "Gmail not configured. Add gmail section to config.yaml."}
+
+    from ..integrations.gmail import list_messages
+    gmail_cfg = _cfg.gmail
+    accounts = gmail_cfg.accounts or []
+    if account != "all":
+        accounts = [a for a in accounts if a.name == account]
+
+    result = {}
+    for acct in accounts:
+        try:
+            msgs = await list_messages(
+                acct.token_file, gmail_cfg.credentials_file,
+                account_name=acct.name, unread_only=unread_only, max_results=limit,
+            )
+            result[acct.name] = [
+                {
+                    "id": m["id"],
+                    "from": m["from"],
+                    "subject": m["subject"],
+                    "date": str(m["date"]) if m.get("date") else None,
+                    "snippet": m["snippet"][:200],
+                    "unread": m["unread"],
+                    "priority": acct.priority,
+                }
+                for m in msgs
+            ]
+        except RuntimeError:
+            result[acct.name] = {"error": "not_authenticated", "account": acct.name}
+        except Exception as exc:
+            log.error("emails %s: %s", acct.name, exc)
+            result[acct.name] = {"error": str(exc)}
+
+    return result
+
+
+@app.get("/api/calendar")
+async def api_calendar(request: Request, hours: int = 24):
+    """Get upcoming calendar events."""
+    if _cfg and hasattr(_cfg, "dashboard"):
+        secret = getattr(_cfg.dashboard, "secret_key", "")
+        if secret and secret not in ("change-me", "your-secret-here"):
+            if request.headers.get("x-jarvis-token", "") != secret:
+                return Response(status_code=401, content='{"error":"unauthorized"}',
+                                media_type="application/json")
+
+    if not _cfg or not _cfg.calendar:
+        return {"error": "Calendar not configured."}
+
+    from ..integrations.google_calendar import list_upcoming
+    cal_cfg = _cfg.calendar
+    result = {}
+    for acct in (cal_cfg.accounts or []):
+        try:
+            events = await list_upcoming(
+                acct.token_file, cal_cfg.credentials_file,
+                hours=hours, user_tz=cal_cfg.timezone, account_name=acct.name,
+            )
+            result[acct.name] = [
+                {
+                    "id": e["id"],
+                    "title": e["title"],
+                    "start": str(e["start"]) if e.get("start") else None,
+                    "location": e.get("location", ""),
+                    "link": e.get("link", ""),
+                }
+                for e in events
+            ]
+        except RuntimeError:
+            result[acct.name] = {"error": "not_authenticated"}
+        except Exception as exc:
+            result[acct.name] = {"error": str(exc)}
+
+    return result
+
+
 @app.get("/api/live")
 async def api_live():
     messages = await get_recent_messages(_db_path, limit=50)

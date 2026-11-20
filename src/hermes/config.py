@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 from typing import Optional, List
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class TelegramConfig(BaseModel):
@@ -37,6 +37,19 @@ class CalendarConfig(BaseModel):
     credentials_file: str = "/etc/hermes/google_credentials.json"
     accounts: List[GoogleAccountConfig] = Field(default_factory=lambda: [GoogleAccountConfig()])
     timezone: str = "Europe/Belgrade"
+
+
+class GmailAccountConfig(BaseModel):
+    name: str = "primary"
+    email: str = ""
+    token_file: str = "/home/hermes/.hermes/gmail_token_primary.json"
+    priority: str = "medium"  # high / medium / low
+
+
+class GmailConfig(BaseModel):
+    credentials_file: str = "/etc/hermes/google_credentials.json"
+    accounts: List[GmailAccountConfig] = Field(default_factory=list)
+    max_unread_shown: int = 10
 
 
 class AnthropicConfig(BaseModel):
@@ -87,6 +100,7 @@ class Config(BaseModel):
     discord: Optional[DiscordConfig] = None
     slack: Optional[SlackConfig] = None
     calendar: Optional[CalendarConfig] = None
+    gmail: Optional[GmailConfig] = None
     anthropic: AnthropicConfig
     deepseek: DeepSeekConfig
     gemini: Optional[GeminiConfig] = None

@@ -18,18 +18,37 @@ slack:
   signing_secret: "YOUR_SLACK_SIGNING_SECRET"
 
 # Google Calendar (supports multiple accounts)
+# Same credentials file as Gmail -- one OAuth2 app covers both.
 # 1. Create OAuth2 credentials at console.cloud.google.com -> APIs & Services -> Credentials
-# 2. Download as google_credentials.json and place at the path below
-# 3. Run /cal auth in Telegram to authenticate each account
+#    Enable: Google Calendar API, Gmail API
+# 2. Download as google_credentials.json -> /etc/hermes/google_credentials.json
+# 3. Run /cal auth and /mail auth [account] in Telegram to authenticate
 calendar:
   credentials_file: "/etc/hermes/google_credentials.json"
   timezone: "Europe/Belgrade"   # your home timezone
   accounts:
-    - name: "primary"
-      token_file: "/home/hermes/.hermes/google_token_primary.json"
-    # Add more accounts:
-    # - name: "work"
-    #   token_file: "/home/hermes/.hermes/google_token_work.json"
+    - name: "velocity"
+      token_file: "/home/hermes/.hermes/google_token_velocity.json"
+
+# Gmail -- multi-account email reading and replying
+# Same credentials file as Calendar (enable Gmail API in the same project).
+# Auth via /mail auth [account] in Telegram or HUD.
+# priority: high = shown first, reply fast; medium = business; low = personal/spam
+gmail:
+  credentials_file: "/etc/hermes/google_credentials.json"
+  accounts:
+    - name: "paywise"
+      email: "nikola@pay-wise.io"
+      token_file: "/home/hermes/.hermes/gmail_token_paywise.json"
+      priority: "high"
+    - name: "velocity"
+      email: "velocity72h@gmail.com"
+      token_file: "/home/hermes/.hermes/gmail_token_velocity.json"
+      priority: "medium"
+    - name: "personal"
+      email: "nikolazivkovic0803@gmail.com"
+      token_file: "/home/hermes/.hermes/gmail_token_personal.json"
+      priority: "low"
 
 anthropic:
   api_key: "sk-ant-..."
