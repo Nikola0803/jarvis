@@ -245,14 +245,18 @@ export default function MiraWorld() {
     if (s === "idle") {
       await startMic();
       const micStream = getMicStream();
-      chunksRef.current = [];
-      if (micStream) {
-        const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
-        const mr = new MediaRecorder(micStream, { mimeType });
-        mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-        mr.start(100);
-        recorderRef.current = mr;
+      if (!micStream) {
+        setReplyText("Microphone access denied. Allow mic in your browser address bar, then try again.");
+        clearTimeout(replyTimer.current);
+        replyTimer.current = setTimeout(() => setReplyText(""), 8000);
+        return;
       }
+      chunksRef.current = [];
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
+      const mr = new MediaRecorder(micStream, { mimeType });
+      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      mr.start(100);
+      recorderRef.current = mr;
       setState("listening");
 
     } else if (s === "listening") {
@@ -290,8 +294,9 @@ export default function MiraWorld() {
           setReplyText("");
         } else {
           const err = await res.json().catch(() => ({}));
-          if (err.reply) {
-            setReplyText(err.reply);
+          const msg = err.reply || err.error;
+          if (msg) {
+            setReplyText(msg);
             clearTimeout(replyTimer.current);
             replyTimer.current = setTimeout(() => setReplyText(""), 10000);
           }

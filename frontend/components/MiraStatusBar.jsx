@@ -55,6 +55,7 @@ function MiraStatusBar({
 
         
         {!isActive && <text x={cx} y={cy + 80} textAnchor="middle" fill={A} fontSize="9" fontFamily="'Share Tech Mono', monospace" letterSpacing="0.14em" opacity="0.32">{"TAP THE ORB TO CHANGE HER STATE"}</text>}
+        {state === "listening" && <text x={cx} y={cy + 80} textAnchor="middle" fill={A} fontSize="9" fontFamily="'Share Tech Mono', monospace" letterSpacing="0.14em" opacity="0.55">{"TAP AGAIN TO SEND"}</text>}
       </svg>
     </div>;
 }
