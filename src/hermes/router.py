@@ -1,7 +1,9 @@
 from __future__ import annotations
+import asyncio
 import logging
-from .config import RouterConfig, Config
+from .config import Config
 from .llm import ClaudeProvider, DeepSeekProvider, GeminiProvider, LLMResponse
+from .memory import build_memory
 
 log = logging.getLogger(__name__)
 
@@ -16,12 +18,17 @@ class Router:
         self._cfg = cfg.router
         self._db_path = cfg.database.path
         self._spend_cap = cfg.anthropic.spend_cap_usd
+        self._memory = build_memory(cfg.memory)
 
         self._providers: dict[str, any] = {
             "claude": ClaudeProvider(cfg.anthropic.api_key, cfg.anthropic.model),
             "deepseek": DeepSeekProvider(cfg.deepseek.api_key, cfg.deepseek.model),
             "gemini": GeminiProvider(cfg.gemini.api_key, cfg.gemini.model),
         }
+
+    @property
+    def memory_enabled(self) -> bool:
+        return self._memory is not None
 
     def _select_provider(self, text: str, history: list[dict]) -> str:
         text_lower = text.lower().strip()
@@ -48,10 +55,37 @@ class Router:
             return False
         return True
 
-    async def route(self, text: str, history: list[dict] | None = None) -> LLMResponse:
+    async def _build_system(self, text: str, user_id: str | None) -> str:
+        """Augment the base system prompt with long-term memory, if available."""
+        if not self._memory or not user_id:
+            return SYSTEM_PROMPT
+        facts = await self._memory.search(text, user_id)
+        if not facts:
+            return SYSTEM_PROMPT
+        return (
+            SYSTEM_PROMPT
+            + "\n\nRelevant things you remember about this user "
+            + "(use them only when helpful, do not recite them):\n"
+            + facts
+        )
+
+    def _remember(self, text: str, reply: str, user_id: str | None) -> None:
+        """Fire-and-forget: store this exchange for future recall."""
+        if not self._memory or not user_id:
+            return
+        exchange = f"User said: {text}\nHermes replied: {reply}"
+        asyncio.create_task(self._memory.add(exchange, user_id))
+
+    async def route(
+        self,
+        text: str,
+        history: list[dict] | None = None,
+        user_id: str | None = None,
+    ) -> LLMResponse:
         history = history or []
         messages = history + [{"role": "user", "content": text}]
 
+        system = await self._build_system(text, user_id)
         provider_name = self._select_provider(text, history)
 
         # Enforce spend cap on Claude
@@ -62,12 +96,16 @@ class Router:
 
         provider = self._providers[provider_name]
         log.info("Routing to %s", provider_name)
-        response = await provider.complete(messages, system=SYSTEM_PROMPT)
+        response = await provider.complete(messages, system=system)
 
         # Fallback if provider errored
         if response.error and provider_name != self._cfg.free_fallback:
             log.warning("%s failed (%s), falling back to %s", provider_name, response.error, self._cfg.free_fallback)
             fallback = self._providers[self._cfg.free_fallback]
-            response = await fallback.complete(messages, system=SYSTEM_PROMPT)
+            response = await fallback.complete(messages, system=system)
+
+        # Persist the exchange to long-term memory on success.
+        if response.text and not response.error:
+            self._remember(text, response.text, user_id)
 
         return response

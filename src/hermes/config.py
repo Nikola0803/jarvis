@@ -63,6 +63,21 @@ class RouterConfig(BaseModel):
     claude_trigger_prefixes: list[str] = Field(
         default=["/code", "/analyze", "/plan", "/think", "/research"]
     )
+    # How many past exchanges to replay as conversation memory per message.
+    history_limit: int = 10
+
+
+class MemoryConfig(BaseModel):
+    """Long-term 'facts brain' (Supermemory). Disabled until enabled + api_key set."""
+    enabled: bool = False
+    provider: str = "supermemory"
+    api_key: str = ""
+    base_url: str = "https://api.supermemory.ai"
+    add_path: str = "/v3/documents"
+    search_path: str = "/v4/search"
+    search_limit: int = 5
+    timeout_seconds: float = 6.0
+    namespace: str = "hermes"
 
 
 class DatabaseConfig(BaseModel):
@@ -85,6 +100,7 @@ class Config(BaseModel):
     deepseek: DeepSeekConfig
     gemini: GeminiConfig
     router: RouterConfig = RouterConfig()
+    memory: Optional[MemoryConfig] = None
     database: DatabaseConfig = DatabaseConfig()
     dashboard: DashboardConfig = DashboardConfig()
     server: dict = {}

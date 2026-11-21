@@ -5,7 +5,7 @@ import logging
 import uvicorn
 from .config import load_config
 from .db.models import init_db
-from .db.queries import log_message
+from .db.queries import log_message, get_conversation_history
 from .router import Router
 from .telegram_bot import build_app
 from .dashboard.app import app as dashboard_app, configure as configure_dashboard
@@ -41,12 +41,20 @@ async def main():
                     user_tz=cfg.calendar.timezone,
                 )
                 if cal_reply is not None:
-                    await log_message(cfg.database.path, text, type("R", (), {"text": cal_reply, "provider": "calendar", "tokens_used": 0, "cost_usd": 0.0, "error": None})())
+                    cal_resp = type("R", (), {
+                        "text": cal_reply, "provider": "calendar", "model": "calendar",
+                        "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0, "error": None,
+                    })()
+                    await log_message(cfg.database.path, text, cal_resp,
+                                      platform=platform, user_id=user_id)
                     return cal_reply
 
-        history = []
-        response = await router.route(text, history)
-        await log_message(cfg.database.path, text, response)
+        history = await get_conversation_history(
+            cfg.database.path, platform, user_id, limit=cfg.router.history_limit
+        )
+        response = await router.route(text, history, user_id=user_id)
+        await log_message(cfg.database.path, text, response,
+                          platform=platform, user_id=user_id)
         return response.text
 
     tasks = []
