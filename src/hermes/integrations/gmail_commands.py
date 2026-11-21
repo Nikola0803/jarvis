@@ -79,7 +79,9 @@ async def handle(
             return (
                 f"Open this URL to authorize Gmail (account: {acct}):\n\n"
                 f"{url}\n\n"
-                f"After approving, paste the code with:\n"
+                f"After you approve, the browser will try to open a localhost "
+                f"page that won't load -- that's expected. Copy the value after "
+                f"'code=' in the address bar (up to the '&'), then send:\n"
                 f"/mail auth_code <code>"
             )
         except Exception as exc:
