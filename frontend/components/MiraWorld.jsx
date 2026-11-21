@@ -412,7 +412,7 @@ export default function MiraWorld() {
 
       {!reducedMotion && (
         <div style={{ position: "fixed", inset: 0, zIndex: 15, pointerEvents: "none" }}>
-          <MiraCore3D state="idle" />
+          <MiraCore3D state={state} />
         </div>
       )}
 

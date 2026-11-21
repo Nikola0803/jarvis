@@ -87,6 +87,7 @@ class RouterConfig(BaseModel):
     free_fallback: str = "gemini"
     free_tier_max_words: int = 8        # messages at or under this word count go to Gemini first
     short_message_max_tokens: int = 150
+    history_limit: int = 10             # past exchanges replayed as conversation memory
     claude_trigger_prefixes: list[str] = Field(
         default=["/code", "/analyze", "/plan", "/think", "/research"]
     )
