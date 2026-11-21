@@ -71,7 +71,11 @@ def clear_cache():
 def start_auth_flow(credentials_file: str) -> tuple[str, Any]:
     from google_auth_oauthlib.flow import InstalledAppFlow
     flow = InstalledAppFlow.from_client_secrets_file(credentials_file, SCOPES)
-    flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+    # Google retired the "oob" copy-paste flow in 2022. Use a loopback redirect
+    # instead: after approving, the browser lands on an unreachable
+    # http://localhost/?code=... page -- the user copies the code out of the
+    # address bar. Works headless and needs a "Desktop app" OAuth client.
+    flow.redirect_uri = "http://localhost"
     auth_url, _ = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
