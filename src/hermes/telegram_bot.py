@@ -4,7 +4,14 @@ from functools import wraps
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 from .router import Router
-from .db.queries import log_message, get_monthly_spend
+from .db.queries import (
+    log_message,
+    get_monthly_spend,
+    get_conversation_history,
+    clear_conversation,
+)
+
+PLATFORM = "telegram"
 
 log = logging.getLogger(__name__)
 
@@ -27,11 +34,13 @@ def build_app(bot_token: str, owner_id: int, router: Router, db_path: str) -> Ap
     @owner_only(owner_id)
     async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         text = update.message.text or ""
+        user_id = str(update.effective_user.id)
         await update.message.chat.send_action("typing")
 
-        # Simple context window: last 10 messages from chat data
-        history = ctx.chat_data.get("history", [])
-        response = await router.route(text, history)
+        # Persistent context window: last N exchanges from the database, so
+        # memory survives restarts and stays scoped to this user.
+        history = await get_conversation_history(db_path, PLATFORM, user_id, limit=10)
+        response = await router.route(text, history, user_id=user_id)
 
         if response.error and not response.text:
             await update.message.reply_text("Something went wrong. Try again.")
@@ -40,12 +49,7 @@ def build_app(bot_token: str, owner_id: int, router: Router, db_path: str) -> Ap
         reply = response.text
         await update.message.reply_text(reply)
 
-        # Update history (keep last 10 exchanges = 20 messages)
-        history.append({"role": "user", "content": text})
-        history.append({"role": "assistant", "content": reply})
-        ctx.chat_data["history"] = history[-20:]
-
-        await log_message(db_path, text, response)
+        await log_message(db_path, text, response, platform=PLATFORM, user_id=user_id)
 
     @owner_only(owner_id)
     async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -59,15 +63,19 @@ def build_app(bot_token: str, owner_id: int, router: Router, db_path: str) -> Ap
 
     @owner_only(owner_id)
     async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        ctx.chat_data["history"] = []
-        await update.message.reply_text("Conversation history cleared.")
+        user_id = str(update.effective_user.id)
+        await clear_conversation(db_path, PLATFORM, user_id)
+        ctx.chat_data["history"] = []  # clear any legacy in-memory window too
+        await update.message.reply_text(
+            "Conversation history cleared. (Long-term memory is kept.)"
+        )
 
     @owner_only(owner_id)
     async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         msg = (
             "*Hermes Commands*\n"
             "/status - show monthly spend\n"
-            "/reset - clear conversation history\n"
+            "/reset - start a fresh conversation (long-term memory kept)\n"
             "/help - this message\n\n"
             "*Trigger prefixes (force Claude):*\n"
             "/code, /analyze, /plan, /think, /research"

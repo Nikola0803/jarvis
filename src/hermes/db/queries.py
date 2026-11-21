@@ -4,19 +4,80 @@ import aiosqlite
 from ..llm.base import LLMResponse
 
 
-async def log_message(db_path: str, user_text: str, response: LLMResponse) -> None:
+async def log_message(
+    db_path: str,
+    user_text: str,
+    response: LLMResponse,
+    platform: str | None = None,
+    user_id: str | None = None,
+) -> None:
     month = datetime.utcnow().strftime("%Y-%m")
     async with aiosqlite.connect(db_path) as db:
         await db.execute(
-            """INSERT INTO messages (direction, provider, model, user_text, agent_text,
-               input_tok, output_tok, cost_usd) VALUES (?,?,?,?,?,?,?,?)""",
-            ("in", response.provider, response.model, user_text, response.text,
-             response.input_tokens, response.output_tokens, response.cost_usd),
+            """INSERT INTO messages (direction, platform, user_id, provider, model,
+               user_text, agent_text, input_tok, output_tok, cost_usd)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            ("in", platform, user_id, response.provider, response.model, user_text,
+             response.text, response.input_tokens, response.output_tokens, response.cost_usd),
         )
         await db.execute(
             """INSERT INTO monthly_spend (month, provider, total_usd) VALUES (?,?,?)
                ON CONFLICT(month, provider) DO UPDATE SET total_usd = total_usd + excluded.total_usd""",
             (month, response.provider, response.cost_usd),
+        )
+        await db.commit()
+
+
+async def get_conversation_history(
+    db_path: str,
+    platform: str,
+    user_id: str,
+    limit: int = 10,
+) -> list[dict]:
+    """Return the last `limit` exchanges for one user as chat messages.
+
+    Each stored row is one exchange (user_text + agent_text); we expand it into
+    a user turn followed by an assistant turn, in chronological order. Only
+    exchanges after the user's most recent /reset marker are included.
+    """
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT after_message_id FROM conversation_resets "
+            "WHERE platform=? AND user_id=? ORDER BY id DESC LIMIT 1",
+            (platform, user_id),
+        ) as cur:
+            reset_row = await cur.fetchone()
+        after_id = reset_row["after_message_id"] if reset_row else 0
+
+        async with db.execute(
+            "SELECT user_text, agent_text FROM messages "
+            "WHERE platform=? AND user_id=? AND id > ? "
+            "ORDER BY id DESC LIMIT ?",
+            (platform, user_id, after_id, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+
+    history: list[dict] = []
+    for row in reversed(rows):  # back to chronological order
+        if row["user_text"]:
+            history.append({"role": "user", "content": row["user_text"]})
+        if row["agent_text"]:
+            history.append({"role": "assistant", "content": row["agent_text"]})
+    return history
+
+
+async def clear_conversation(db_path: str, platform: str, user_id: str) -> None:
+    """Start a fresh conversation for this user without deleting the audit log."""
+    async with aiosqlite.connect(db_path) as db:
+        async with db.execute(
+            "SELECT COALESCE(MAX(id), 0) FROM messages WHERE platform=? AND user_id=?",
+            (platform, user_id),
+        ) as cur:
+            (last_id,) = await cur.fetchone()
+        await db.execute(
+            "INSERT INTO conversation_resets (platform, user_id, after_message_id) VALUES (?,?,?)",
+            (platform, user_id, last_id),
         )
         await db.commit()
 
