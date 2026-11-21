@@ -6,13 +6,20 @@ import uvicorn
 from fastapi import Request
 from .config import load_config
 from .db.models import init_db
-from .db.queries import log_message
+from .db.queries import log_message, get_conversation_history
 from .router import Router
+from .llm.base import LLMResponse
 from .telegram_bot import build_app
 from .dashboard.app import app as dashboard_app, configure as configure_dashboard
 from .mcp_server import configure as configure_mcp, build_mcp_router
 from .agents import AgentScheduler, DawnAgent, MiloAgent, get_store as get_approval_store
 from .memory import get_store as get_memory_store
+
+
+def _stub_response(text: str, provider: str) -> LLMResponse:
+    """Wrap a non-LLM reply (calendar/gmail) so it logs with the right columns."""
+    return LLMResponse(text=text, provider=provider, model=provider,
+                       input_tokens=0, output_tokens=0, cost_usd=0.0, error=None)
 
 
 def setup_logging(level: str = "INFO") -> None:
@@ -69,7 +76,8 @@ async def main():
                     user_tz=cfg.calendar.timezone,
                 )
                 if cal_reply is not None:
-                    await log_message(cfg.database.path, text, type("R", (), {"text": cal_reply, "provider": "calendar", "tokens_used": 0, "cost_usd": 0.0, "error": None})())
+                    await log_message(cfg.database.path, text, _stub_response(cal_reply, "calendar"),
+                                      platform=platform, user_id=user_id)
                     return cal_reply
 
         # Gmail intent intercept (before LLM)
@@ -78,12 +86,16 @@ async def main():
             if is_mail_intent(text):
                 mail_reply = await mail_handle(text, cfg.gmail)
                 if mail_reply is not None:
-                    await log_message(cfg.database.path, text, type("R", (), {"text": mail_reply, "provider": "gmail", "tokens_used": 0, "cost_usd": 0.0, "error": None})())
+                    await log_message(cfg.database.path, text, _stub_response(mail_reply, "gmail"),
+                                      platform=platform, user_id=user_id)
                     return mail_reply
 
-        history = []
+        history = await get_conversation_history(
+            cfg.database.path, platform, user_id, limit=cfg.router.history_limit
+        )
         response = await router.route(text, history)
-        await log_message(cfg.database.path, text, response)
+        await log_message(cfg.database.path, text, response,
+                          platform=platform, user_id=user_id)
         return response.text
 
     # Build approval store (shared between agents and Telegram bot)

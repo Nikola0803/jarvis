@@ -5,9 +5,11 @@ from functools import wraps
 from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
 from .router import Router
-from .db.queries import log_message, get_monthly_spend
+from .db.queries import log_message, get_monthly_spend, get_conversation_history, clear_conversation
 
 log = logging.getLogger(__name__)
+
+PLATFORM = "telegram"
 
 
 def owner_only(owner_id: int):
@@ -48,6 +50,7 @@ def build_app(
     @owner_only(owner_id)
     async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         text = update.message.text or ""
+        user_id = str(update.effective_user.id)
         await update.message.chat.send_action("typing")
 
         # Gmail intent intercept
@@ -68,7 +71,9 @@ def build_app(
                     await update.message.reply_text(cal_reply)
                     return
 
-        history = ctx.chat_data.get("history", [])
+        # Persistent conversation memory: last N exchanges from the DB, so it
+        # survives restarts and stays scoped to this user.
+        history = await get_conversation_history(db_path, PLATFORM, user_id, limit=10)
         response = await router.route(text, history, max_tokens=300)
 
         if response.error and not response.text:
@@ -78,11 +83,7 @@ def build_app(
         reply = response.text
         await update.message.reply_text(reply)
 
-        history.append({"role": "user", "content": text})
-        history.append({"role": "assistant", "content": reply})
-        ctx.chat_data["history"] = history[-20:]
-
-        await log_message(db_path, text, response)
+        await log_message(db_path, text, response, platform=PLATFORM, user_id=user_id)
 
     @owner_only(owner_id)
     async def handle_voice(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -91,6 +92,7 @@ def build_app(
             await update.message.reply_text("Voice pipeline not configured.")
             return
 
+        user_id = str(update.effective_user.id)
         await update.message.chat.send_action("typing")
 
         # Download OGG voice file from Telegram
@@ -111,8 +113,8 @@ def build_app(
 
         log.info("Voice STT: %r", text[:80])
 
-        # Route through LLM (voice -- keep short)
-        history = ctx.chat_data.get("history", [])
+        # Route through LLM (voice -- keep short). Shared persistent memory.
+        history = await get_conversation_history(db_path, PLATFORM, user_id, limit=10)
         response = await router.route(text, history, max_tokens=80)
 
         if response.error and not response.text:
@@ -135,11 +137,7 @@ def build_app(
             # Fallback to text if voice fails
             await update.message.reply_text(f"_{text}_\n\n{reply}", parse_mode="Markdown")
 
-        history.append({"role": "user", "content": text})
-        history.append({"role": "assistant", "content": reply})
-        ctx.chat_data["history"] = history[-20:]
-
-        await log_message(db_path, text, response)
+        await log_message(db_path, text, response, platform=PLATFORM, user_id=user_id)
 
     @owner_only(owner_id)
     async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -156,8 +154,12 @@ def build_app(
 
     @owner_only(owner_id)
     async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        ctx.chat_data["history"] = []
-        await update.message.reply_text("Conversation history cleared.")
+        user_id = str(update.effective_user.id)
+        await clear_conversation(db_path, PLATFORM, user_id)
+        ctx.chat_data["history"] = []  # clear any legacy in-memory window too
+        await update.message.reply_text(
+            "Conversation history cleared. (Long-term memory kept.)"
+        )
 
     @owner_only(owner_id)
     async def cmd_update(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
