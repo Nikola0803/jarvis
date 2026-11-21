@@ -23,7 +23,6 @@ function fakeVoice(t, seed) {
 
 export default function MiraWorld() {
   const [state, setState] = useState("idle");
-  const [reducedMotion, setReducedMotion] = useState(false);
   const [dialOpen, setDialOpen] = useState(false);
   const [textOpen, setTextOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
@@ -85,14 +84,6 @@ export default function MiraWorld() {
     document.addEventListener("click", once);
     document.addEventListener("keydown", once);
     return () => { document.removeEventListener("click", once); document.removeEventListener("keydown", once); };
-  }, []);
-
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const apply = () => setReducedMotion(mq.matches);
-    apply();
-    mq.addEventListener("change", apply);
-    return () => mq.removeEventListener("change", apply);
   }, []);
 
   useEffect(() => { enterMira({ instant: true }); }, []);
@@ -402,7 +393,10 @@ export default function MiraWorld() {
 
       <ShaderBackground opacity={0.12} voiceActive={state === "speaking" || state === "listening"} />
 
-      {!reducedMotion && <MiraField state={state} />}
+      {/* The core (field + 3D orb + smoke/dust) always renders -- this is an
+          intentionally animated personal HUD, so we don't gate it behind the
+          OS "reduce motion" setting, which otherwise blanks everything. */}
+      <MiraField state={state} />
 
       <div style={{ position: "fixed", inset: 0, zIndex: 15, pointerEvents: "none" }}>
         <div data-mira-orb style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
@@ -410,11 +404,9 @@ export default function MiraWorld() {
         </div>
       </div>
 
-      {!reducedMotion && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 15, pointerEvents: "none" }}>
-          <MiraCore3D state={state} />
-        </div>
-      )}
+      <div style={{ position: "fixed", inset: 0, zIndex: 15, pointerEvents: "none" }}>
+        <MiraCore3D state={state} />
+      </div>
 
       <MiraStatusBar state={state} alertMode={alertMode} />
 
