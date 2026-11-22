@@ -105,6 +105,19 @@ memory:
   timeout_seconds: 6.0           # memory never blocks a reply longer than this
   namespace: "hermes"            # tag used to scope memories to this agent
 
+# Codex -- OpenAI's coding agent as ZERO's "web-dev hands". Uses your ChatGPT
+# sign-in on this server (run `codex` once to log in), NOT the paid API. ZERO
+# delegates coding/design jobs to it via the code_task tool.
+codex:
+  enabled: false                 # set true after `codex` is signed in on the box
+  binary: "codex"                # or an absolute path to the codex binary
+  default_repo: "/opt/jarvis"
+  allowed_repos:                 # Codex may only run inside these paths
+    - "/opt/jarvis"
+    - "/var/www/peptide-command-center"
+  extra_args: []                 # e.g. ["--full-auto"] if Codex won't write in your version
+  timeout_seconds: 900
+
 # GitHub -- powers the HUD PROJECTS panel and ZERO's repo tools (read-only use).
 # token: a personal access token (classic, 'repo' scope). Keep it out of git.
 github:

@@ -123,6 +123,19 @@ class HermesAgentConfig(BaseModel):
     timeout_seconds: float = 90.0
 
 
+class CodexConfig(BaseModel):
+    """OpenAI Codex CLI as ZERO's coding/design sub-agent. Uses your ChatGPT
+    sign-in on the server (not the API), invoked via the code_task MCP tool.
+    `allowed_repos` limits where Codex may run; `extra_args` tunes the CLI
+    (e.g. a sandbox/approval flag) without code changes."""
+    enabled: bool = False
+    binary: str = "codex"
+    default_repo: str = "/opt/jarvis"
+    allowed_repos: List[str] = Field(default_factory=lambda: ["/opt/jarvis"])
+    extra_args: List[str] = Field(default_factory=list)
+    timeout_seconds: int = 900
+
+
 class GitHubConfig(BaseModel):
     """GitHub access for the PROJECTS panel and ZERO's repo tools. Read-only use;
     `token` is a personal access token (classic, `repo` scope) kept out of git."""
@@ -158,6 +171,7 @@ class Config(BaseModel):
     hermes_agent: Optional[HermesAgentConfig] = None
     memory: Optional[MemoryConfig] = None
     github: Optional[GitHubConfig] = None
+    codex: Optional[CodexConfig] = None
     database: DatabaseConfig = DatabaseConfig()
     dashboard: DashboardConfig = DashboardConfig()
     server: dict = {}
