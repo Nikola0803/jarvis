@@ -3,12 +3,23 @@ from __future__ import annotations
 import asyncio
 import logging
 import uvicorn
+from fastapi import Request
 from .config import load_config
 from .db.models import init_db
 from .db.queries import log_message, get_conversation_history
 from .router import Router
+from .llm.base import LLMResponse
 from .telegram_bot import build_app
 from .dashboard.app import app as dashboard_app, configure as configure_dashboard
+from .mcp_server import configure as configure_mcp, build_mcp_router
+from .agents import AgentScheduler, DawnAgent, MiloAgent, get_store as get_approval_store
+from .memory import get_store as get_memory_store
+
+
+def _stub_response(text: str, provider: str) -> LLMResponse:
+    """Wrap a non-LLM reply (calendar/gmail) so it logs with the right columns."""
+    return LLMResponse(text=text, provider=provider, model=provider,
+                       input_tokens=0, output_tokens=0, cost_usd=0.0, error=None)
 
 
 def setup_logging(level: str = "INFO") -> None:
@@ -25,9 +36,33 @@ async def main():
 
     log.info("Initializing database at %s", cfg.database.path)
     await init_db(cfg.database.path)
-    configure_dashboard(cfg.database.path)
+
+    # Init memory store (must come before Router so context injection works)
+    memory = get_memory_store(cfg.database.path)
+    log.info("Memory store ready")
+
+    # Seed owner name from config if not already set
+    if not memory.get_profile("name"):
+        memory.set_profile("name", "Nikola")
+    if not memory.get_profile("timezone"):
+        tz = cfg.calendar.timezone if cfg.calendar else "Europe/Belgrade"
+        memory.set_profile("timezone", tz)
+
+    # Init Slack notifier if configured
+    if cfg.slack:
+        from .integrations.slack_notifier import init as init_slack
+        notifier = init_slack(cfg.slack.bot_token)
+        log.info("Slack notifier ready")
 
     router = Router(cfg)
+    configure_dashboard(cfg.database.path, cfg, router)
+    configure_mcp(cfg, router, cfg.database.path)
+
+    # Mount MCP server if the mcp package is installed
+    mcp_router = build_mcp_router()
+    if mcp_router:
+        dashboard_app.include_router(mcp_router)
+        log.info("MCP server mounted at /mcp/sse + /mcp/messages/")
 
     async def handle_message(platform: str, user_id: str, text: str) -> str:
         """Unified handler called by every platform adapter."""
@@ -41,13 +76,19 @@ async def main():
                     user_tz=cfg.calendar.timezone,
                 )
                 if cal_reply is not None:
-                    cal_resp = type("R", (), {
-                        "text": cal_reply, "provider": "calendar", "model": "calendar",
-                        "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0, "error": None,
-                    })()
-                    await log_message(cfg.database.path, text, cal_resp,
+                    await log_message(cfg.database.path, text, _stub_response(cal_reply, "calendar"),
                                       platform=platform, user_id=user_id)
                     return cal_reply
+
+        # Gmail intent intercept (before LLM)
+        if cfg.gmail:
+            from .integrations.gmail_commands import is_mail_intent, handle as mail_handle
+            if is_mail_intent(text):
+                mail_reply = await mail_handle(text, cfg.gmail)
+                if mail_reply is not None:
+                    await log_message(cfg.database.path, text, _stub_response(mail_reply, "gmail"),
+                                      platform=platform, user_id=user_id)
+                    return mail_reply
 
         history = await get_conversation_history(
             cfg.database.path, platform, user_id, limit=cfg.router.history_limit
@@ -57,6 +98,11 @@ async def main():
                           platform=platform, user_id=user_id)
         return response.text
 
+    # Build approval store (shared between agents and Telegram bot)
+    approval_store = get_approval_store()
+    # scheduler_ref is populated after Telegram app is built -- avoids chicken-and-egg
+    scheduler_ref: list = [None]
+
     tasks = []
 
     # Telegram (always required)
@@ -65,8 +111,42 @@ async def main():
         owner_id=cfg.telegram.owner_user_id,
         router=router,
         db_path=cfg.database.path,
+        elevenlabs_api_key=cfg.elevenlabs.api_key if cfg.elevenlabs else None,
+        elevenlabs_voice_id=cfg.elevenlabs.voice_id if cfg.elevenlabs else None,
+        anthropic_api_key=cfg.anthropic.api_key if cfg.anthropic else None,
+        anthropic_model=cfg.anthropic.model if cfg.anthropic else "claude-sonnet-4-5",
+        gmail_cfg=cfg.gmail if cfg.gmail else None,
+        calendar_cfg=cfg.calendar if cfg.calendar else None,
+        approval_store=approval_store,
+        scheduler_ref=scheduler_ref,
     )
-    tasks.append(tg_app.run_polling(drop_pending_updates=True))
+    await tg_app.initialize()
+    await tg_app.start()
+    # Drop pending updates and use a generous timeout to avoid 409 Conflict when
+    # the previous process's long-poll connection is still alive on Telegram's side.
+    await tg_app.updater.start_polling(
+        drop_pending_updates=True,
+        read_timeout=30,
+        write_timeout=30,
+        connect_timeout=30,
+        pool_timeout=30,
+        allowed_updates=["message", "callback_query"],
+    )
+    log.info("Telegram bot polling started")
+
+    # Agent scheduler -- Dawn (8am briefing) + Milo (8am + 4pm email triage)
+    user_tz = getattr(cfg, "timezone", None) or (cfg.calendar.timezone if cfg.calendar else "Europe/Belgrade")
+    scheduler = AgentScheduler(user_tz=user_tz)
+    for AgentClass in (DawnAgent, MiloAgent):
+        scheduler.register(AgentClass(
+            cfg=cfg,
+            bot=tg_app,
+            approval_store=approval_store,
+            db_path=cfg.database.path,
+        ))
+    scheduler_ref[0] = scheduler  # wire into the /agent command handler
+    scheduler.start()
+    log.info("Agent scheduler started (%s timezone)", user_tz)
 
     # WhatsApp (optional -- webhook via FastAPI)
     if cfg.whatsapp:
@@ -92,7 +172,6 @@ async def main():
         result = sl_build(cfg.slack.bot_token, cfg.slack.signing_secret)
         if result[0]:
             sl_app, sl_handler = result
-            from fastapi import Request
             @dashboard_app.post("/webhook/slack")
             async def slack_events(req: Request):
                 return await sl_handler.handle(req)
@@ -113,7 +192,12 @@ async def main():
         cfg.dashboard.host, cfg.dashboard.port,
         sum(1 for x in [cfg.whatsapp, cfg.discord, cfg.slack] if x),
     )
-    await asyncio.gather(*tasks)
+    try:
+        await asyncio.gather(*tasks)
+    finally:
+        await tg_app.updater.stop()
+        await tg_app.stop()
+        await tg_app.shutdown()
 
 
 def run():

@@ -1,0 +1,24 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+*.db
+
+# Never commit real credentials
+deploy/config.yaml
+config.yaml
+*_credentials.json
+*_token*.json
+
+# Vendored binary (downloaded per-host, 40MB) — don't commit
+cloudflared
+
+# Runtime state written by the HUD/agent at runtime
+state/
+*.jsonl

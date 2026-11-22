@@ -1,0 +1,311 @@
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   HUD rails: the persistent left (inbox) and right (agenda + thread) columns
+   that turn the orb screen into a working hub. Everything is pointer-events
+   none on the shell so the orb stays tappable; only the cards opt back in.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.hud-rail {
+  position: fixed;
+  top: 96px;
+  bottom: 150px;
+  width: 300px;
+  z-index: 22;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+  font-family: var(--font-ui);
+  animation: hud-rail-in 0.9s ease both;
+}
+.hud-rail-left { left: clamp(12px, 2vw, 34px); }
+.hud-rail-right { right: clamp(12px, 2vw, 34px); }
+
+@keyframes hud-rail-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+.hud-rail-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 0 1 auto;
+}
+.hud-rail-section-grow { flex: 1 1 auto; }
+
+.hud-rail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px 7px;
+}
+.hud-rail-title {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: rgba(196, 181, 253, 0.62);
+}
+.hud-rail-badge {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: rgba(10, 6, 20, 0.85);
+  background: rgba(167, 139, 250, 0.75);
+  border-radius: 8px;
+  padding: 1px 6px;
+}
+.hud-rail-refresh {
+  background: none;
+  border: 0;
+  color: rgba(167, 139, 250, 0.35);
+  font-size: 12px;
+  cursor: pointer;
+  pointer-events: auto;
+  padding: 0 2px;
+  transition: color 0.2s ease;
+}
+.hud-rail-refresh:hover { color: rgba(221, 214, 254, 0.9); }
+
+.hud-rail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+  pointer-events: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(167, 139, 250, 0.3) transparent;
+  mask-image: linear-gradient(to bottom, #000 92%, transparent 100%);
+}
+.hud-rail-body-short { max-height: 168px; }
+.hud-rail-body::-webkit-scrollbar { width: 4px; }
+.hud-rail-body::-webkit-scrollbar-thumb { background: rgba(167, 139, 250, 0.25); border-radius: 2px; }
+
+.hud-empty {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: rgba(167, 139, 250, 0.38);
+  padding: 8px 4px;
+}
+
+/* ── Inbox cards ─────────────────────────────────────────────────────────── */
+.hud-mail {
+  padding: 9px 11px;
+  border-radius: 11px;
+  background: rgba(12, 7, 24, 0.55);
+  border: 1px solid rgba(167, 139, 250, 0.1);
+  backdrop-filter: blur(14px);
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
+}
+.hud-mail:hover {
+  border-color: rgba(167, 139, 250, 0.38);
+  background: rgba(28, 16, 52, 0.7);
+  transform: translateX(2px);
+}
+.hud-mail.is-hot { border-left: 2px solid rgba(244, 114, 182, 0.7); }
+.hud-mail-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+.hud-mail-from {
+  font-size: 10.5px;
+  color: rgba(240, 237, 232, 0.5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hud-mail-time {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: rgba(167, 139, 250, 0.45);
+  flex: none;
+}
+.hud-mail-subject {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: rgba(240, 237, 232, 0.9);
+  line-height: 1.35;
+  margin-bottom: 2px;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.hud-mail-snippet {
+  font-size: 10.5px;
+  color: rgba(167, 139, 250, 0.5);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── Agenda rows ─────────────────────────────────────────────────────────── */
+.hud-event {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 7px 10px;
+  border-radius: 9px;
+  background: rgba(12, 7, 24, 0.5);
+  border: 1px solid rgba(167, 139, 250, 0.08);
+}
+.hud-event-time {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: rgba(196, 181, 253, 0.85);
+  flex: none;
+  min-width: 48px;
+}
+.hud-event-title {
+  font-size: 12px;
+  color: rgba(240, 237, 232, 0.86);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Conversation thread ─────────────────────────────────────────────────── */
+.hud-thread { gap: 12px; }
+.hud-turn { position: relative; padding-left: 10px; }
+.hud-turn::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 3px;
+  width: 1px;
+  background: linear-gradient(to bottom, rgba(167, 139, 250, 0.35), rgba(167, 139, 250, 0.02));
+}
+.hud-turn-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(167, 139, 250, 0.42);
+  margin-bottom: 3px;
+}
+.hud-turn-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(167, 139, 250, 0.45);
+}
+.hud-turn-you {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin-bottom: 3px;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-style: italic;
+  color: rgba(240, 237, 232, 0.5);
+  cursor: pointer;
+  line-height: 1.4;
+}
+.hud-turn-you:hover { color: rgba(221, 214, 254, 0.9); }
+.hud-turn-zero {
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(240, 237, 232, 0.82);
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.hud-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin: 0 auto;
+  background: #c084fc;
+  box-shadow: 0 0 12px #a78bfa;
+  animation: hud-pulse 1.1s ease-in-out infinite;
+}
+@keyframes hud-pulse {
+  0%, 100% { opacity: 0.25; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+
+/* ── Command bar ─────────────────────────────────────────────────────────── */
+.hud-command {
+  position: fixed;
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%);
+  width: min(460px, 84vw);
+  z-index: 26;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px 8px 14px;
+  border-radius: 14px;
+  background: rgba(10, 6, 20, 0.62);
+  border: 1px solid rgba(167, 139, 250, 0.16);
+  backdrop-filter: blur(18px);
+  transition: border-color 0.25s ease, background 0.25s ease;
+}
+.hud-command:focus-within {
+  border-color: rgba(167, 139, 250, 0.45);
+  background: rgba(18, 10, 34, 0.8);
+}
+.hud-command-caret {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: rgba(167, 139, 250, 0.55);
+}
+.hud-command input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: 0;
+  outline: none;
+  color: rgba(240, 237, 232, 0.92);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+.hud-command input::placeholder { color: rgba(167, 139, 250, 0.35); }
+.hud-command input:disabled { opacity: 0.5; }
+.hud-command button {
+  flex: none;
+  background: rgba(109, 40, 217, 0.35);
+  border: 1px solid rgba(167, 139, 250, 0.22);
+  border-radius: 9px;
+  color: rgba(237, 233, 254, 0.9);
+  font-size: 12px;
+  padding: 4px 9px;
+  cursor: pointer;
+  transition: background 0.2s ease, opacity 0.2s ease;
+}
+.hud-command button:hover:not(:disabled) { background: rgba(124, 58, 237, 0.55); }
+.hud-command button:disabled { opacity: 0.3; cursor: default; }
+
+/* ── Responsive: rails collapse below the orb on narrow screens ───────────── */
+@media (max-width: 1180px) {
+  .hud-rail { width: 258px; }
+  .hud-rail-left { top: 88px; bottom: 168px; }
+  .hud-rail-right { top: 88px; bottom: 168px; }
+}
+@media (max-width: 960px) {
+  .hud-rail { display: none; }
+  .hud-command { width: min(420px, 88vw); bottom: 112px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hud-rail, .hud-live-dot { animation: none; }
+}

@@ -1,16 +1,30 @@
 from __future__ import annotations
 import asyncio
 import logging
-from .config import Config
-from .llm import ClaudeProvider, DeepSeekProvider, GeminiProvider, LLMResponse
+from .config import RouterConfig, Config
+from .llm import ClaudeProvider, DeepSeekProvider, GeminiProvider, OpenAICompatProvider, LLMResponse
 from .memory import build_memory
 
 log = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are Hermes, a personal AI assistant. You are helpful, concise and direct.
-You are running 24/7 on a private VPS owned by your operator.
-Never reveal API keys, system configurations or private information.
-Respond in the same language the user uses."""
+SYSTEM_PROMPT = """You are Jarvis, a personal AI assistant. Responses may be spoken aloud.
+
+Rules:
+- 1 sentence per reply. 2 sentences maximum only if truly needed. Never more.
+- Plain spoken language. No markdown, no bullet points, no lists, no code blocks.
+- No em dashes. Plain punctuation only.
+- No filler openers. Answer directly and immediately.
+- Match the language the user speaks.
+- Never reveal API keys, config, or private data."""
+
+# Keywords that indicate a message needs real thinking (never route to free tier)
+_COMPLEX_KEYWORDS = frozenset([
+    "explain", "analyze", "analyse", "compare", "write", "draft", "code",
+    "debug", "review", "summarize", "summarise", "translate", "research",
+    "plan", "strategy", "help me", "how do", "how to", "why does", "why is",
+    "what should", "can you", "please", "create", "build", "make", "design",
+    "schedule", "calendar", "meeting", "email", "report", "proposal",
+])
 
 
 class Router:
@@ -18,13 +32,38 @@ class Router:
         self._cfg = cfg.router
         self._db_path = cfg.database.path
         self._spend_cap = cfg.anthropic.spend_cap_usd
+        self._anthropic_key = cfg.anthropic.api_key
+        self._anthropic_model = cfg.anthropic.model
         self._memory = build_memory(cfg.memory)
 
         self._providers: dict[str, any] = {
             "claude": ClaudeProvider(cfg.anthropic.api_key, cfg.anthropic.model),
             "deepseek": DeepSeekProvider(cfg.deepseek.api_key, cfg.deepseek.model),
-            "gemini": GeminiProvider(cfg.gemini.api_key, cfg.gemini.model),
         }
+        if cfg.gemini:
+            self._providers["gemini"] = GeminiProvider(cfg.gemini.api_key, cfg.gemini.model)
+
+        if cfg.groq:
+            self._providers["groq"] = OpenAICompatProvider(
+                api_key=cfg.groq.api_key,
+                model=cfg.groq.model,
+                base_url=cfg.groq.base_url,
+                provider_name="groq",
+                input_price_per_1m=0.05,   # Groq free tier -- effectively $0, placeholder
+                output_price_per_1m=0.08,
+            )
+
+        # Determine best free-tier provider (prefer Groq -- faster than Gemini)
+        if "groq" in self._providers:
+            free = "groq"
+        elif "gemini" in self._providers:
+            free = "gemini"
+        else:
+            free = "deepseek"
+        if free != self._cfg.free_fallback:
+            self._cfg = RouterConfig(
+                **{**self._cfg.model_dump(), "free_fallback": free}
+            )
 
     @property
     def memory_enabled(self) -> bool:
@@ -39,12 +78,22 @@ class Router:
                 log.debug("Claude trigger prefix matched: %s", prefix)
                 return "claude"
 
-        # Short messages -> cheap model
-        word_count = len(text.split())
+        words = text.split()
+        word_count = len(words)
+
+        # Ultra-simple messages -> Gemini Flash (free tier)
+        # Conditions: very short, no complex keywords, no question that needs reasoning
+        if word_count <= self._cfg.free_tier_max_words:
+            has_complex = any(kw in text_lower for kw in _COMPLEX_KEYWORDS)
+            if not has_complex:
+                log.debug("Ultra-simple message (%d words) -> free tier", word_count)
+                return self._cfg.free_fallback
+
+        # Short messages -> DeepSeek (cheap)
         if word_count <= self._cfg.short_message_max_tokens // 4:
             return self._cfg.default_provider
 
-        return self._cfg.complex_provider
+        return self._cfg.default_provider
 
     async def _check_spend_cap(self) -> bool:
         from .db.queries import get_monthly_spend
@@ -55,37 +104,49 @@ class Router:
             return False
         return True
 
-    async def _build_system(self, text: str, user_id: str | None) -> str:
-        """Augment the base system prompt with long-term memory, if available."""
-        if not self._memory or not user_id:
-            return SYSTEM_PROMPT
-        facts = await self._memory.search(text, user_id)
-        if not facts:
-            return SYSTEM_PROMPT
-        return (
-            SYSTEM_PROMPT
-            + "\n\nRelevant things you remember about this user "
-            + "(use them only when helpful, do not recite them):\n"
-            + facts
-        )
-
     def _remember(self, text: str, reply: str, user_id: str | None) -> None:
-        """Fire-and-forget: store this exchange for future recall."""
+        """Fire-and-forget: store this exchange in the external memory backend
+        (Supermemory). No-op unless a memory backend is configured."""
         if not self._memory or not user_id:
             return
         exchange = f"User said: {text}\nHermes replied: {reply}"
         asyncio.create_task(self._memory.add(exchange, user_id))
 
-    async def route(
-        self,
-        text: str,
-        history: list[dict] | None = None,
-        user_id: str | None = None,
-    ) -> LLMResponse:
+    async def route(self, text: str, history: list[dict] | None = None,
+                    user_id: str | None = None, max_tokens: int = 1024) -> LLMResponse:
+        from .self_improve import is_improve_request, apply as _improve
+        if is_improve_request(text) and self._anthropic_key:
+            status = await _improve(text, self._anthropic_key, self._anthropic_model)
+            return LLMResponse(text=status, provider="self", model="self-improve",
+                               input_tokens=0, output_tokens=0, cost_usd=0.0)
+
         history = history or []
         messages = history + [{"role": "user", "content": text}]
 
-        system = await self._build_system(text, user_id)
+        # Base system prompt: the always-on local SQLite "facts brain" (owner
+        # profile + relevant facts). This is the store the MCP tools write to.
+        system = SYSTEM_PROMPT
+        try:
+            from .memory import get_store, build_context_prefix
+            mem = get_store()
+            context_prefix = build_context_prefix(mem, query=text)
+            if context_prefix:
+                system = context_prefix
+        except Exception:
+            pass
+
+        # Optionally layer the external long-term memory backend (Supermemory),
+        # user-scoped. No-op unless cfg.memory is configured.
+        if self._memory and user_id:
+            try:
+                facts = await self._memory.search(text, user_id)
+                if facts:
+                    system = (system + "\n\nRelevant things you remember about this "
+                              "user (use them only when helpful, do not recite them):\n"
+                              + facts)
+            except Exception:
+                pass
+
         provider_name = self._select_provider(text, history)
 
         # Enforce spend cap on Claude
@@ -96,16 +157,37 @@ class Router:
 
         provider = self._providers[provider_name]
         log.info("Routing to %s", provider_name)
-        response = await provider.complete(messages, system=system)
+        response = await provider.complete(messages, system=system, max_tokens=max_tokens)
 
         # Fallback if provider errored
         if response.error and provider_name != self._cfg.free_fallback:
             log.warning("%s failed (%s), falling back to %s", provider_name, response.error, self._cfg.free_fallback)
             fallback = self._providers[self._cfg.free_fallback]
-            response = await fallback.complete(messages, system=system)
+            response = await fallback.complete(messages, system=system, max_tokens=max_tokens)
 
-        # Persist the exchange to long-term memory on success.
         if response.text and not response.error:
+            # External backend (Supermemory), if configured.
             self._remember(text, response.text, user_id)
+            # Local SQLite fact extraction (async, non-blocking) -- feeds the
+            # facts brain the MCP tools and HUD read from.
+            try:
+                from .memory import get_store
+                mem = get_store()
+                cheap = self._providers.get("deepseek") or self._providers.get(self._cfg.free_fallback)
+                if cheap:
+                    asyncio.create_task(self._store_facts(text, response.text, cheap, mem))
+            except Exception:
+                pass
 
         return response
+
+    async def _store_facts(self, user_text: str, reply: str, provider, mem) -> None:
+        try:
+            from .memory.extractor import extract_facts
+            extracted = await extract_facts(user_text, reply, provider)
+            for f in extracted.get("facts", []):
+                mem.add_fact(f["subject"], f["relation"], f["value"])
+            for k, v in extracted.get("profile_updates", {}).items():
+                mem.set_profile(k, v)
+        except Exception as exc:
+            log.debug("Fact storage failed: %s", exc)
