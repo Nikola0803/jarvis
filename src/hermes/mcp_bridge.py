@@ -25,7 +25,7 @@ from datetime import datetime, timedelta
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import yaml
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from hermes.integrations import gmail, google_calendar
 
@@ -47,7 +47,7 @@ _CAL_ACCOUNTS = _CAL.get("accounts", [])
 _CAL_TZ = _CAL.get("timezone", "Europe/Belgrade")
 _DB_PATH = (_CFG.get("database") or {}).get("path", "/home/hermes/.hermes/hermes.db")
 
-mcp = FastMCP("jarvis")
+mcp = MCPServer("jarvis")
 
 
 def _account(name: str) -> dict | None:
