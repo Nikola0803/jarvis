@@ -321,5 +321,68 @@ async def list_repo_pull_requests(repo: str, limit: int = 10) -> str:
                      for p in prs)
 
 
+# ── Codex: delegate coding/design work ───────────────────────────────────────
+
+_CODEX = _CFG.get("codex") or {}
+_CODEX_ENABLED = _CODEX.get("enabled", False)
+_CODEX_BIN = _CODEX.get("binary", "codex")
+_CODEX_DEFAULT_REPO = _CODEX.get("default_repo", "/opt/jarvis")
+_CODEX_ALLOWED = _CODEX.get("allowed_repos") or [_CODEX_DEFAULT_REPO]
+_CODEX_EXTRA = _CODEX.get("extra_args") or []
+_CODEX_TIMEOUT = _CODEX.get("timeout_seconds", 900)
+
+
+def _repo_allowed(path: str) -> bool:
+    rp = os.path.realpath(path)
+    for allowed in _CODEX_ALLOWED:
+        ap = os.path.realpath(allowed)
+        if rp == ap or rp.startswith(ap + os.sep):
+            return True
+    return False
+
+
+@mcp.tool()
+async def code_task(instruction: str, repo: str = "", timeout_seconds: int = 0) -> str:
+    """Delegate a CODING or DESIGN task to Codex (OpenAI's coding agent) running
+    on this server. Codex edits files in the given repo and returns a summary of
+    what it changed. `repo` is an absolute path to one of the allowed repos
+    (default: the main repo). Use this to write or change code, markup or styles
+    -- not for ordinary conversation. Describe the change clearly and concretely."""
+    import asyncio
+    if not _CODEX_ENABLED:
+        return ("Codex is not enabled. Set codex.enabled: true in config and run "
+                "`codex` once on the server to sign in with ChatGPT.")
+    repo_path = repo or _CODEX_DEFAULT_REPO
+    if not _repo_allowed(repo_path):
+        return f"Repo '{repo_path}' is not in codex.allowed_repos."
+    if not os.path.isdir(repo_path):
+        return f"Repo path '{repo_path}' does not exist."
+    timeout = timeout_seconds or _CODEX_TIMEOUT
+    args = [_CODEX_BIN, "exec", "--cd", repo_path, *(_CODEX_EXTRA), instruction]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        try:
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            return f"Codex timed out after {timeout}s (the task may be too large)."
+    except FileNotFoundError:
+        return f"Codex binary '{_CODEX_BIN}' not found on PATH."
+    except Exception as exc:  # noqa: BLE001
+        return f"Codex error: {exc}"
+    text = (out or b"").decode(errors="replace").strip()
+    if not text:
+        return "Codex finished with no output."
+    # Return the tail: Codex prints its working steps then a final summary.
+    return text[-3500:]
+
+
 if __name__ == "__main__":
     mcp.run()
