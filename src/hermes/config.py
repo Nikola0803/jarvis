@@ -123,6 +123,15 @@ class HermesAgentConfig(BaseModel):
     timeout_seconds: float = 90.0
 
 
+class GitHubConfig(BaseModel):
+    """GitHub access for the PROJECTS panel and ZERO's repo tools. Read-only use;
+    `token` is a personal access token (classic, `repo` scope) kept out of git."""
+    token: str = ""
+    username: str = ""                      # optional; the token's own user by default
+    repos: List[str] = Field(default_factory=list)  # optional allowlist "owner/name"; empty = all the token sees
+    max_shown: int = 8
+
+
 class DatabaseConfig(BaseModel):
     path: str = "/home/hermes/.hermes/hermes.db"
 
@@ -148,6 +157,7 @@ class Config(BaseModel):
     router: RouterConfig = RouterConfig()
     hermes_agent: Optional[HermesAgentConfig] = None
     memory: Optional[MemoryConfig] = None
+    github: Optional[GitHubConfig] = None
     database: DatabaseConfig = DatabaseConfig()
     dashboard: DashboardConfig = DashboardConfig()
     server: dict = {}

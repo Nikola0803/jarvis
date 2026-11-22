@@ -177,6 +177,61 @@
   white-space: nowrap;
 }
 
+/* ── Projects (GitHub) ───────────────────────────────────────────────────── */
+.hud-project {
+  padding: 7px 10px;
+  border-radius: 9px;
+  background: rgba(12, 7, 24, 0.5);
+  border: 1px solid rgba(167, 139, 250, 0.08);
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
+}
+.hud-project:hover {
+  border-color: rgba(167, 139, 250, 0.38);
+  background: rgba(28, 16, 52, 0.7);
+  transform: translateX(2px);
+}
+.hud-project-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.hud-project-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(240, 237, 232, 0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hud-project-count {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: rgba(10, 6, 20, 0.85);
+  background: rgba(167, 139, 250, 0.7);
+  border-radius: 8px;
+  padding: 1px 6px;
+  flex: none;
+}
+.hud-project-meta {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-top: 2px;
+}
+.hud-project-lock {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: rgba(167, 139, 250, 0.45);
+}
+.hud-project-time {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: rgba(196, 181, 253, 0.45);
+}
+
 /* ── Reminders ───────────────────────────────────────────────────────────── */
 .hud-reminder {
   display: flex;
