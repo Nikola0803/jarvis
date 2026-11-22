@@ -15,3 +15,10 @@ deploy/config.yaml
 config.yaml
 *_credentials.json
 *_token*.json
+
+# Vendored binary (downloaded per-host, 40MB) — don't commit
+cloudflared
+
+# Runtime state written by the HUD/agent at runtime
+state/
+*.jsonl

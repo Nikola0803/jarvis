@@ -94,6 +94,16 @@ async def api_status():
     return {"status": "running", "db": _db_path}
 
 
+@app.get("/api/reminders")
+async def api_reminders():
+    """Open reminders/tasks for the HUD command-center panel."""
+    from ..db.queries import list_reminders
+    try:
+        return {"reminders": await list_reminders(_db_path, include_done=False, limit=20)}
+    except Exception as exc:  # noqa: BLE001
+        return {"reminders": [], "error": str(exc)}
+
+
 @app.get("/api/connections")
 async def api_connections():
     """Live connection status for every integration Jarvis has."""
