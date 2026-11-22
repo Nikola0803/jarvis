@@ -338,9 +338,25 @@ def build_app(
         except Exception as exc:
             await update.message.reply_text(f"Error: {exc}")
 
+    @owner_only(owner_id)
+    async def cmd_mail(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """/mail ... -- Gmail (auth, inbox, read, reply). Routed to the gmail handler.
+
+        Needed because '/mail' is a Telegram command, so it never reaches the
+        text handler (which skips commands) where the mail intercept lives.
+        """
+        if not gmail_cfg:
+            await update.message.reply_text("Gmail isn't configured.")
+            return
+        await update.message.chat.send_action("typing")
+        from .integrations.gmail_commands import handle as mail_handle
+        reply = await mail_handle(update.message.text or "", gmail_cfg)
+        await update.message.reply_text(reply or "Didn't catch that. Try /mail auth <account>.")
+
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("mail", cmd_mail))
     app.add_handler(CommandHandler("update", cmd_update))
     app.add_handler(CommandHandler("agent", cmd_agent))
     app.add_handler(CommandHandler("remember", cmd_remember))
