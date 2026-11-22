@@ -42,9 +42,12 @@ async def ask_hermes(
         ],
     }
     if session_id:
-        # Best-effort conversation continuity; harmless if the server ignores it.
-        payload["session_id"] = session_id
-        payload["user"] = session_id
+        # Real conversation continuity: Hermes loads this session's prior turns
+        # from its own store (X-Hermes-Session-Id) and scopes long-term memory to
+        # the channel (X-Hermes-Session-Key). Both are authenticated by the Bearer
+        # key above. We still send only the latest user turn; history lives server-side.
+        headers["X-Hermes-Session-Id"] = session_id
+        headers["X-Hermes-Session-Key"] = session_id
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             r = await client.post(url, headers=headers, json=payload)
