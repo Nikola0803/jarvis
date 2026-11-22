@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { appendTurn } from "../../../../lib/conversationLog";
 
 const BACKEND = "http://127.0.0.1:8080/api/chat";
 const SECRET = process.env.JARVIS_TOKEN || "";
@@ -22,6 +23,15 @@ export async function POST(req: NextRequest) {
   if (xReply) responseHeaders.set("x-reply", xReply);
   const xTranscript = res.headers.get("x-transcript");
   if (xTranscript) responseHeaders.set("x-transcript", xTranscript);
+
+  if (xReply) {
+    void appendTurn({
+      ts: new Date().toISOString(),
+      method: "text",
+      transcript: (body.text || "").slice(0, 500),
+      reply: Buffer.from(xReply, "latin1").toString("utf8"),
+    });
+  }
 
   return new NextResponse(res.body, { status: res.status, headers: responseHeaders });
 }

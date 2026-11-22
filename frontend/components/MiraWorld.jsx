@@ -7,6 +7,9 @@ import MiraRing from "./MiraRing";
 import MiraCore3D from "./MiraCore3D";
 import MiraStatusBar from "./MiraStatusBar";
 import MiraDial from "./MiraDial";
+import HudLeftRail from "./HudLeftRail";
+import HudRightRail from "./HudRightRail";
+import CommandBar from "./HudCommandBar";
 import { enterMira, tickMiraVoice } from "../lib/miraStage";
 import { setVoiceEnergy, getVoiceEnergy } from "../lib/voiceEnergy";
 import { stopMic, micLevel } from "../lib/micLevel";
@@ -28,6 +31,7 @@ export default function MiraWorld() {
   const [infoOpen, setInfoOpen] = useState(false);
   const [textInput, setTextInput] = useState("");
   const [replyText, setReplyText] = useState("");
+  const [liveTranscript, setLiveTranscript] = useState("");
   const [emails, setEmails] = useState(null);
   const [calendar, setCalendar] = useState(null);
   const [infoTab, setInfoTab] = useState("mail"); // "mail" | "cal"
@@ -122,12 +126,50 @@ export default function MiraWorld() {
         }
       } catch (_) {}
 
-      vad = await MicVAD.new({
+      // End-of-turn detection. 350 ms was too twitchy: any mid-sentence pause
+    // ("...so the thing is, [breath] we need...") closed the turn and sent a
+    // partial question. Instead run a SILENCE_GATE_MS debounce: keep appending
+    // speech while the gap is short, and only commit the utterance once the
+    // silence gate has actually elapsed. If speech resumes inside the gate,
+    // the timer is cancelled and the utterance continues as one turn.
+    const SILENCE_GATE_MS = 900;
+    let pendingAudio = [];
+    let endGateTimer = null;
+
+    const flushTurn = () => {
+      endGateTimer = null;
+      const chunks = pendingAudio;
+      pendingAudio = [];
+      const total = chunks.reduce((n, c) => n + c.length, 0);
+      const audio = new Float32Array(total);
+      let o = 0;
+      for (const c of chunks) { audio.set(c, o); o += c.length; }
+      if (stateRef.current !== "listening" || audio.length === 0) return;
+      setState("thinking");
+      if (sendVoiceAudioRef.current) sendVoiceAudioRef.current(float32ToWav(audio));
+    };
+
+    vad = await MicVAD.new({
         baseAssetPath: "/",
         onnxWASMBasePath: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.31.1/dist/",
         model: "v5",
         startOnLoad: true,
+        // End-of-turn latency: 600 ms of silence closes the VAD segment instead
+        // of the 1400 ms default, and only 200 ms of pre-speech audio is kept.
+        // The real end-of-turn decision is the 900 ms SILENCE_GATE_MS debounce
+        // in onSpeechEnd, so a short pause no longer cuts the owner off.
+        redemptionMs: 600,
+        preSpeechPadMs: 200,
+        minSpeechMs: 250,
+        positiveSpeechThreshold: 0.4,
+        negativeSpeechThreshold: 0.25,
         onSpeechStart: () => {
+          // Owner is talking again inside the silence gate: this is the same
+          // turn continuing, so cancel the pending flush instead of cutting off.
+          if (endGateTimer) {
+            clearTimeout(endGateTimer);
+            endGateTimer = null;
+          }
           if (stateRef.current === "speaking") {
             // Voice interrupt: stop Z.E.R.O mid-sentence and start listening
             interruptedRef.current = true;
@@ -145,11 +187,14 @@ export default function MiraWorld() {
         },
         onSpeechEnd: (audio) => {
           if (stateRef.current !== "listening") return;
-          setState("thinking");
-          if (sendVoiceAudioRef.current) sendVoiceAudioRef.current(float32ToWav(audio));
+          // Buffer the segment and wait out the silence gate; only flush to the
+          // server once the owner has really stopped (or the gate expires).
+          pendingAudio.push(audio);
+          if (endGateTimer) clearTimeout(endGateTimer);
+          endGateTimer = setTimeout(flushTurn, SILENCE_GATE_MS);
         },
         onVADMisfire: () => {
-          if (stateRef.current === "listening") {
+          if (stateRef.current === "listening" && !endGateTimer && pendingAudio.length === 0) {
             isBusyRef.current = false;
             setState("idle");
           }
@@ -295,6 +340,8 @@ export default function MiraWorld() {
       const form = new FormData();
       form.append("audio", blob, "voice.wav");
       const res = await fetch("/api/jarvis/voice", { method: "POST", body: form });
+      const transcriptHdr = res.headers.get("x-transcript");
+      if (transcriptHdr) setLiveTranscript(transcriptHdr);
       if (res.ok && res.headers.get("content-type")?.includes("audio")) {
         const reply = res.headers.get("X-Reply");
         if (reply) { setReplyText(reply); clearTimeout(replyTimer.current); replyTimer.current = setTimeout(() => setReplyText(""), 10000); }
@@ -338,6 +385,7 @@ export default function MiraWorld() {
     if (!text || stateRef.current !== "idle") return;
     setTextInput("");
     setTextOpen(false);
+    setLiveTranscript(text);
     setState("thinking");
     try {
       const res = await fetch("/api/jarvis/chat", {
@@ -410,6 +458,34 @@ export default function MiraWorld() {
 
       <MiraStatusBar state={state} alertMode={alertMode} />
 
+      <HudLeftRail
+        voiceActive={state !== "idle"}
+        onAsk={(q) => {
+          setTextInput(q);
+          setTextOpen(true);
+          setTimeout(() => textInputRef.current?.focus(), 50);
+        }}
+      />
+
+      <HudRightRail
+        voiceActive={state !== "idle"}
+        liveReply={replyText}
+        liveTranscript={liveTranscript}
+        onAsk={(q) => {
+          setTextInput(q);
+          setTextOpen(true);
+          setTimeout(() => textInputRef.current?.focus(), 50);
+        }}
+      />
+
+      <CommandBar
+        ref={textInputRef}
+        value={textInput}
+        onChange={setTextInput}
+        disabled={state !== "idle"}
+        onSubmit={() => handleTextSubmit({ preventDefault() {} })}
+      />
+
       <button
         type="button"
         onClick={handleOrbTap}
@@ -465,7 +541,7 @@ export default function MiraWorld() {
           </div>
         )}
 
-      {textOpen && (
+      {textOpen && !replyText && (
         <div style={{
           position: "fixed", bottom: 72, left: "50%", transform: "translateX(-50%)",
           width: "min(480px, 90vw)", zIndex: 50,

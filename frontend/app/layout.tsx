@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./hud-rails.css";
 
 export const metadata: Metadata = {
   title: "Z.E.R.O",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os
+import re
 import time
 from pathlib import Path
 from datetime import datetime, timezone
@@ -12,6 +13,34 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 app = FastAPI(title="Hermes Dashboard", docs_url=None, redoc_url=None)
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+_SENTENCE_END = re.compile(r"[.!?…](?=\s|$)")
+
+
+def _take_sentences(buf: str, force: int = 180) -> tuple[list[str], str]:
+    """Split off finished sentences so TTS can start on the first one.
+
+    Returns (sentences_ready, remainder). A sentence ends on . ! ? … followed by
+    whitespace, or after `force` chars at the last word boundary (long clauses).
+    """
+    ready: list[str] = []
+    while True:
+        match = _SENTENCE_END.search(buf)
+        if match:
+            cut = match.end()
+            seg, buf = buf[:cut].strip(), buf[cut:].lstrip()
+            if seg:
+                ready.append(seg)
+            continue
+        if len(buf) >= force:
+            cut = buf.rfind(" ", 0, force)
+            cut = cut if cut > 0 else force
+            seg, buf = buf[:cut].strip(), buf[cut:].lstrip()
+            if seg:
+                ready.append(seg)
+            continue
+        return ready, buf
+
 
 _db_path: str = ""
 _cfg = None
@@ -82,7 +111,13 @@ async def api_connections():
 @app.post("/api/voice")
 async def api_voice(request: Request, audio: UploadFile = File(...)):
     """Voice endpoint: audio in -> STT -> LLM -> TTS -> MP3 out.
-    Used by Z.E.R.O HUD and wake word script."""
+    Used by Z.E.R.O HUD and wake word script.
+
+    Latency-optimised path: the reply is streamed from Hermes (reasoning disabled)
+    and speech starts on the first finished sentence, so the HUD hears audio
+    instead of waiting for the full reply + full TTS buffer. Every segment is one
+    continuous MPEG stream (ID3 tags stripped from later segments).
+    """
     import logging
     log = logging.getLogger("hermes.voice")
     from ..voice import elevenlabs_provider
@@ -99,6 +134,7 @@ async def api_voice(request: Request, audio: UploadFile = File(...)):
         log.warning("voice: ElevenLabs not configured")
         return {"error": "Voice pipeline not configured"}
 
+    t_start = time.monotonic()
     audio_bytes = await audio.read()
     filename = audio.filename or "voice.webm"
     mime = audio.content_type or "audio/webm"
@@ -110,39 +146,105 @@ async def api_voice(request: Request, audio: UploadFile = File(...)):
         log.error("voice: STT failed: %s", exc)
         return {"error": f"STT failed: {exc}"}
 
-    log.info("voice: STT => %r", text)
+    t_stt = time.monotonic() - t_start
+    log.info("voice: STT => %r (%.2fs)", text, t_stt)
     if not text:
         return {"error": "empty transcription"}
-
-    reply_text, brain_err = await _brain(text)
-    log.info("voice: brain => %r (error=%s)", reply_text[:120], brain_err)
-
-    if not reply_text:
-        log.error("voice: brain returned empty text, error=%s", brain_err)
-        return {"transcript": text, "reply": "I had a brain freeze -- check the logs.", "error": f"LLM empty: {brain_err}"}
 
     def _h(s: str) -> str:
         return s.encode("ascii", errors="replace").decode("ascii")
 
-    transcript_text = text
+    ha = getattr(_cfg, "hermes_agent", None) if _cfg else None
+    if not (ha and getattr(ha, "enabled", False) and ha.api_key):
+        # Fallback: local router, fully buffered (no streaming available).
+        reply_text, brain_err = await _brain(text)
+        log.info("voice: brain => %r (error=%s)", reply_text[:120], brain_err)
+        if not reply_text:
+            return {"transcript": text, "reply": "I had a brain freeze -- check the logs.",
+                    "error": f"LLM empty: {brain_err}"}
+        try:
+            audio_out = await elevenlabs_provider.synthesize(reply_text)
+        except Exception as exc:
+            log.error("voice: TTS failed: %s", exc)
+            return {"transcript": text, "reply": reply_text, "error": f"TTS failed: {exc}"}
+        return Response(content=audio_out, media_type="audio/mpeg",
+                        headers={"X-Transcript": _h(text[:200]), "X-Reply": _h(reply_text[:200])})
 
+    from ..hermes_client import stream_hermes
+
+    async def sentences():
+        buf = ""
+        async for delta in stream_hermes(ha.base_url, ha.api_key, text,
+                                         model=ha.model, timeout=ha.timeout_seconds,
+                                         session_id="zero-hud"):
+            buf += delta
+            ready, buf = _take_sentences(buf)
+            for s in ready:
+                yield s
+        tail = buf.strip()
+        if tail:
+            yield tail
+
+    gen = sentences()
     try:
-        audio_bytes = await elevenlabs_provider.synthesize(reply_text)
+        first_sentence = await gen.__anext__()
+    except StopAsyncIteration:
+        log.error("voice: brain returned empty text")
+        return {"transcript": text, "reply": "I had a brain freeze -- check the logs.",
+                "error": "LLM empty"}
     except Exception as exc:
-        log.error("voice: TTS failed: %s", exc)
-        return {"transcript": transcript_text, "reply": reply_text, "error": f"TTS failed: {exc}"}
+        log.error("voice: brain stream failed: %s", exc)
+        return {"transcript": text, "reply": "I had a brain freeze -- check the logs.",
+                "error": f"LLM error: {exc}"}
 
-    if not audio_bytes:
-        log.warning("voice: TTS returned empty audio")
-        return {"transcript": transcript_text, "reply": reply_text, "error": "TTS returned empty audio"}
+    t_first = time.monotonic() - t_start
+    log.info("voice: first sentence after %.2fs (stt %.2fs) => %r", t_first, t_stt, first_sentence[:100])
+    # Rollback switch: JARVIS_SENTENCE_STREAM=0 synthesizes the whole reply in one
+    # TTS call instead of per-sentence stitching.
+    sentence_stream = os.environ.get("JARVIS_SENTENCE_STREAM", "1") != "0"
 
-    log.info("voice: returning %d bytes of audio", len(audio_bytes))
-    return Response(
-        content=audio_bytes,
+    async def audio_body():
+        started = time.monotonic()
+        first_chunk = True
+        prev = None
+        if not sentence_stream:
+            full = first_sentence
+            try:
+                async for sentence in gen:
+                    full = f"{full} {sentence}"
+            except Exception as exc:  # noqa: BLE001
+                log.warning("voice: reply stream ended early: %s", exc)
+            async for chunk in elevenlabs_provider.synthesize_stream(full):
+                yield chunk
+            log.info("voice: single-shot TTS finished in %.2fs", time.monotonic() - started)
+            return
+        try:
+            async for chunk in elevenlabs_provider.synthesize_stream(first_sentence):
+                if first_chunk:
+                    log.info("voice: first audio chunk after %.2fs total", time.monotonic() - t_start)
+                    first_chunk = False
+                yield chunk
+        except Exception as exc:
+            log.error("voice: TTS failed on first sentence: %s", exc)
+            return
+        prev = first_sentence
+        try:
+            async for sentence in gen:
+                async for chunk in elevenlabs_provider.synthesize_stream(
+                        sentence, previous_text=prev, strip_id3=True):
+                    yield chunk
+                prev = sentence
+        except Exception as exc:  # noqa: BLE001 -- keep the audio already sent
+            log.warning("voice: reply stream ended early: %s", exc)
+        log.info("voice: stream finished in %.2fs (total %.2fs)",
+                 time.monotonic() - started, time.monotonic() - t_start)
+
+    return StreamingResponse(
+        audio_body(),
         media_type="audio/mpeg",
         headers={
-            "X-Transcript": _h(transcript_text[:200]),
-            "X-Reply": _h(reply_text[:200]),
+            "X-Transcript": _h(text[:200]),
+            "X-Reply": _h(first_sentence[:200]),
         },
     )
 
