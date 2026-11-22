@@ -18,7 +18,9 @@
   font-family: var(--font-ui);
   animation: hud-rail-in 0.9s ease both;
 }
-.hud-rail-left { left: clamp(12px, 2vw, 34px); }
+/* The left rail clears the top-left overview strip (clock/weather/greeting)
+   so the Inbox never paints over it. The right rail starts at the top. */
+.hud-rail-left { left: clamp(12px, 2vw, 34px); top: 176px; }
 .hud-rail-right { right: clamp(12px, 2vw, 34px); }
 
 @keyframes hud-rail-in {
@@ -173,6 +175,63 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ── Reminders ───────────────────────────────────────────────────────────── */
+.hud-reminder {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  padding: 7px 10px;
+  border-radius: 9px;
+  background: rgba(12, 7, 24, 0.5);
+  border: 1px solid rgba(167, 139, 250, 0.08);
+}
+.hud-reminder.is-hot { border-left: 2px solid rgba(244, 114, 182, 0.7); }
+.hud-reminder-check {
+  flex: none;
+  margin-top: 1px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 14px;
+  color: rgba(196, 181, 253, 0.7);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+.hud-reminder-check:hover { color: rgba(244, 114, 182, 0.95); transform: scale(1.15); }
+.hud-reminder-body { min-width: 0; flex: 1; }
+.hud-reminder-text {
+  font-size: 12px;
+  color: rgba(240, 237, 232, 0.88);
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.hud-reminder-meta {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-top: 2px;
+}
+.hud-reminder-due {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: rgba(196, 181, 253, 0.6);
+}
+.hud-reminder.is-hot .hud-reminder-due { color: rgba(244, 114, 182, 0.85); }
+.hud-reminder-proj {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: rgba(167, 139, 250, 0.5);
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(167, 139, 250, 0.1);
 }
 
 /* ── Conversation thread ─────────────────────────────────────────────────── */

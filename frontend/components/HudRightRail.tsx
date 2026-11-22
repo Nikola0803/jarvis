@@ -11,6 +11,7 @@ import { RailHeader, fmtTime } from "./HudLeftRail";
 
 type Event = { id: string; title: string; start: string | null; location?: string; link?: string; _acct: string };
 type Turn = { ts: string; method: "voice" | "text"; transcript?: string; reply: string };
+type Reminder = { id: number; text: string; due_at: string | null; project?: string | null; done?: number };
 
 export default function HudRightRail({
   voiceActive,
@@ -25,6 +26,7 @@ export default function HudRightRail({
 }) {
   const [events, setEvents] = useState<Event[] | null>(null);
   const [calErr, setCalErr] = useState("");
+  const [reminders, setReminders] = useState<Reminder[] | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [pending, setPending] = useState<Turn | null>(null);
   const threadRef = useRef<HTMLDivElement>(null);
@@ -46,6 +48,16 @@ export default function HudRightRail({
     }
   }, []);
 
+  const loadReminders = useCallback(async () => {
+    try {
+      const res = await fetch("/api/jarvis/reminders", { cache: "no-store" });
+      const data = await res.json();
+      setReminders(Array.isArray(data?.reminders) ? data.reminders : []);
+    } catch {
+      setReminders((r) => r ?? []);
+    }
+  }, []);
+
   const loadTurns = useCallback(async () => {
     try {
       const res = await fetch("/api/jarvis/conversations?limit=20", { cache: "no-store" });
@@ -56,12 +68,13 @@ export default function HudRightRail({
     }
   }, []);
 
-  useEffect(() => { loadCal(); loadTurns(); }, [loadCal, loadTurns]);
+  useEffect(() => { loadCal(); loadReminders(); loadTurns(); }, [loadCal, loadReminders, loadTurns]);
   useEffect(() => {
     const a = setInterval(loadCal, 300000);
     const b = setInterval(loadTurns, 30000);
-    return () => { clearInterval(a); clearInterval(b); };
-  }, [loadCal, loadTurns]);
+    const c = setInterval(loadReminders, 120000);
+    return () => { clearInterval(a); clearInterval(b); clearInterval(c); };
+  }, [loadCal, loadReminders, loadTurns]);
 
   // A finished voice/text turn: show it, then reconcile with the server log.
   useEffect(() => {
@@ -74,10 +87,10 @@ export default function HudRightRail({
       });
     }
     if (!voiceActive) {
-      const id = setTimeout(() => { setPending(null); loadTurns(); }, 1200);
+      const id = setTimeout(() => { setPending(null); loadTurns(); loadReminders(); }, 1200);
       return () => clearTimeout(id);
     }
-  }, [voiceActive, liveReply, liveTranscript, loadTurns]);
+  }, [voiceActive, liveReply, liveTranscript, loadTurns, loadReminders]);
 
   const shown = pending ? [...turns, pending] : turns;
 
@@ -98,6 +111,39 @@ export default function HudRightRail({
             <div key={e.id} className="hud-event">
               <span className="hud-event-time">{fmtEventStart(e.start)}</span>
               <span className="hud-event-title">{e.title}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="hud-rail-section">
+        <RailHeader title="Reminders" badge={reminders?.length ? String(reminders.length) : undefined} onRefresh={loadReminders} />
+        <div className="hud-rail-body hud-rail-body-short">
+          {reminders === null && <div className="hud-empty">syncing…</div>}
+          {reminders && reminders.length === 0 && <div className="hud-empty">nothing on the list</div>}
+          {reminders?.map((r) => (
+            <div key={r.id} className={`hud-reminder ${isOverdue(r.due_at) ? "is-hot" : ""}`}>
+              <button
+                type="button"
+                className="hud-reminder-check"
+                title="Mark done"
+                aria-label={`Mark "${r.text}" done`}
+                onClick={() => {
+                  onAsk(`Complete reminder ${r.id}`);
+                  setReminders((cur) => (cur || []).filter((x) => x.id !== r.id));
+                }}
+              >
+                ○
+              </button>
+              <div className="hud-reminder-body">
+                <div className="hud-reminder-text">{r.text}</div>
+                {(r.due_at || r.project) && (
+                  <div className="hud-reminder-meta">
+                    {r.due_at && <span className="hud-reminder-due">{fmtDue(r.due_at)}</span>}
+                    {r.project && <span className="hud-reminder-proj">{r.project}</span>}
+                  </div>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -142,4 +188,22 @@ function fmtEventStart(iso: string | null) {
   const sameDay = d.toDateString() === now.toDateString();
   const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return sameDay ? time : `${d.toLocaleDateString([], { weekday: "short" })} ${time}`;
+}
+
+function fmtDue(iso: string | null) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return sameDay
+    ? `today ${time}`
+    : `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
+}
+
+function isOverdue(iso: string | null) {
+  if (!iso) return false;
+  const d = new Date(iso);
+  return !isNaN(d.getTime()) && d.getTime() < Date.now();
 }
