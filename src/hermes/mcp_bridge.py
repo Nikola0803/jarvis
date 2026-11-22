@@ -384,5 +384,83 @@ async def code_task(instruction: str, repo: str = "", timeout_seconds: int = 0) 
     return text[-3500:]
 
 
+# ── Claude Code: a second coding hand (multi-account) ────────────────────────
+
+_CC = _CFG.get("claude_code") or {}
+_CC_ENABLED = _CC.get("enabled", False)
+_CC_BIN = _CC.get("binary", "claude")
+_CC_DEFAULT_REPO = _CC.get("default_repo", "/opt/jarvis")
+_CC_ALLOWED = _CC.get("allowed_repos") or [_CC_DEFAULT_REPO]
+_CC_ACCOUNTS = {a["name"]: a for a in (_CC.get("accounts") or []) if a.get("name")}
+_CC_EXTRA = _CC.get("extra_args") or ["--permission-mode", "acceptEdits"]
+_CC_TIMEOUT = _CC.get("timeout_seconds", 900)
+
+
+def _cc_repo_allowed(path: str) -> bool:
+    rp = os.path.realpath(path)
+    for allowed in _CC_ALLOWED:
+        ap = os.path.realpath(allowed)
+        if rp == ap or rp.startswith(ap + os.sep):
+            return True
+    return False
+
+
+@mcp.tool()
+async def code_task_claude(instruction: str, repo: str = "", account: str = "",
+                           timeout_seconds: int = 0) -> str:
+    """Delegate a CODING or DESIGN task to Claude Code (a second coding hand next
+    to Codex). It edits files in the given repo and returns a summary. `repo` is
+    an absolute path in the allowed list (default: the main repo). `account`
+    picks which Claude login to use (by name) when more than one is configured.
+    Use for writing/changing code; describe the change clearly."""
+    import asyncio
+    if not _CC_ENABLED:
+        return ("Claude Code is not enabled. Set claude_code.enabled: true and run "
+                "`claude` once on the server to sign in.")
+    repo_path = repo or _CC_DEFAULT_REPO
+    if not _cc_repo_allowed(repo_path):
+        return f"Repo '{repo_path}' is not in claude_code.allowed_repos."
+    if not os.path.isdir(repo_path):
+        return f"Repo path '{repo_path}' does not exist."
+
+    env = dict(os.environ)
+    if account:
+        acct = _CC_ACCOUNTS.get(account)
+        if not acct:
+            return f"Unknown Claude account '{account}'. Configured: {', '.join(_CC_ACCOUNTS) or 'none'}."
+        if acct.get("config_dir"):
+            env["CLAUDE_CONFIG_DIR"] = acct["config_dir"]
+    elif _CC_ACCOUNTS:
+        # default to the first configured account's auth
+        first = next(iter(_CC_ACCOUNTS.values()))
+        if first.get("config_dir"):
+            env["CLAUDE_CONFIG_DIR"] = first["config_dir"]
+
+    timeout = timeout_seconds or _CC_TIMEOUT
+    args = [_CC_BIN, "-p", *(_CC_EXTRA), instruction]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            cwd=repo_path,
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        try:
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            return f"Claude Code timed out after {timeout}s (task may be too large)."
+    except FileNotFoundError:
+        return f"Claude binary '{_CC_BIN}' not found on PATH."
+    except Exception as exc:  # noqa: BLE001
+        return f"Claude Code error: {exc}"
+    text = (out or b"").decode(errors="replace").strip()
+    return text[-3500:] if text else "Claude Code finished with no output."
+
+
 if __name__ == "__main__":
     mcp.run()

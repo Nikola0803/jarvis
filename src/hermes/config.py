@@ -136,6 +136,25 @@ class CodexConfig(BaseModel):
     timeout_seconds: int = 900
 
 
+class ClaudeCodeAccount(BaseModel):
+    """One Claude Code login. `config_dir` is that account's CLAUDE_CONFIG_DIR,
+    so two accounts stay isolated on the same machine."""
+    name: str
+    config_dir: str = ""
+
+
+class ClaudeCodeConfig(BaseModel):
+    """Claude Code CLI as a coding hand, alongside Codex. Runs `claude -p` in a
+    repo under `allowed_repos`. Supports multiple accounts (pick with `account`)."""
+    enabled: bool = False
+    binary: str = "claude"
+    default_repo: str = "/opt/jarvis"
+    allowed_repos: List[str] = Field(default_factory=lambda: ["/opt/jarvis"])
+    accounts: List[ClaudeCodeAccount] = Field(default_factory=list)
+    extra_args: List[str] = Field(default_factory=lambda: ["--permission-mode", "acceptEdits"])
+    timeout_seconds: int = 900
+
+
 class GitHubConfig(BaseModel):
     """GitHub access for the PROJECTS panel and ZERO's repo tools. Read-only use;
     `token` is a personal access token (classic, `repo` scope) kept out of git."""
@@ -172,6 +191,7 @@ class Config(BaseModel):
     memory: Optional[MemoryConfig] = None
     github: Optional[GitHubConfig] = None
     codex: Optional[CodexConfig] = None
+    claude_code: Optional[ClaudeCodeConfig] = None
     database: DatabaseConfig = DatabaseConfig()
     dashboard: DashboardConfig = DashboardConfig()
     server: dict = {}
