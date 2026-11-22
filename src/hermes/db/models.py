@@ -43,9 +43,23 @@ CREATE TABLE IF NOT EXISTS conversation_resets (
 )
 """
 
+# Reminders / tasks ZERO manages by voice and the HUD shows at a glance.
+CREATE_REMINDERS = """
+CREATE TABLE IF NOT EXISTS reminders (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    due_at     TEXT,              -- ISO8601 local time, nullable
+    text       TEXT NOT NULL,
+    project    TEXT,              -- optional project/tag
+    done       INTEGER DEFAULT 0,
+    source     TEXT DEFAULT 'zero'
+)
+"""
+
 CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(platform, user_id, id)",
     "CREATE INDEX IF NOT EXISTS idx_resets_user ON conversation_resets(platform, user_id, id)",
+    "CREATE INDEX IF NOT EXISTS idx_reminders_open ON reminders(done, due_at)",
 ]
 
 
@@ -65,6 +79,7 @@ async def init_db(db_path: str) -> None:
         await db.execute(CREATE_MESSAGES)
         await db.execute(CREATE_SPEND)
         await db.execute(CREATE_RESETS)
+        await db.execute(CREATE_REMINDERS)
         await _migrate_messages(db)
         for stmt in CREATE_INDEXES:
             await db.execute(stmt)

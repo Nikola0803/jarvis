@@ -92,6 +92,51 @@ async def get_recent_messages(db_path: str, limit: int = 50) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+_CREATE_REMINDERS = """
+CREATE TABLE IF NOT EXISTS reminders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    due_at TEXT, text TEXT NOT NULL, project TEXT, done INTEGER DEFAULT 0, source TEXT DEFAULT 'zero'
+)
+"""
+
+
+async def add_reminder(db_path: str, text: str, due_at: str | None = None,
+                       project: str | None = None, source: str = "zero") -> int:
+    """Add a reminder/task. due_at is an ISO-8601 string or None. Returns its id."""
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(_CREATE_REMINDERS)
+        cur = await db.execute(
+            "INSERT INTO reminders (text, due_at, project, source) VALUES (?,?,?,?)",
+            (text.strip(), (due_at or None), (project or None), source),
+        )
+        await db.commit()
+        return cur.lastrowid
+
+
+async def list_reminders(db_path: str, include_done: bool = False, limit: int = 50) -> list[dict]:
+    """Open reminders (soonest due first, then newest). include_done adds completed ones."""
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(_CREATE_REMINDERS)
+        db.row_factory = aiosqlite.Row
+        where = "" if include_done else "WHERE done = 0"
+        async with db.execute(
+            f"SELECT id, text, due_at, project, done, created_at FROM reminders {where} "
+            "ORDER BY done ASC, (due_at IS NULL) ASC, due_at ASC, id DESC LIMIT ?",
+            (limit,),
+        ) as cur:
+            rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def complete_reminder(db_path: str, reminder_id: int) -> bool:
+    """Mark a reminder done. Returns True if a row changed."""
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(_CREATE_REMINDERS)
+        cur = await db.execute("UPDATE reminders SET done = 1 WHERE id = ? AND done = 0", (reminder_id,))
+        await db.commit()
+        return cur.rowcount > 0
+
+
 async def get_monthly_spend(db_path: str) -> dict[str, float]:
     month = datetime.utcnow().strftime("%Y-%m")
     async with aiosqlite.connect(db_path) as db:
