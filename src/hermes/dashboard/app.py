@@ -25,6 +25,21 @@ def configure(db_path: str, cfg=None, router=None) -> None:
     _router = router
 
 
+async def _brain(text: str, session_id: str | None = "zero-hud") -> tuple[str, str | None]:
+    """Answer `text`. Uses Hermes Agent (real harness + tools) when configured,
+    otherwise falls back to the local LLM router. Returns (reply, error)."""
+    ha = getattr(_cfg, "hermes_agent", None) if _cfg else None
+    if ha and getattr(ha, "enabled", False) and ha.api_key:
+        from ..hermes_client import ask_hermes
+        return await ask_hermes(ha.base_url, ha.api_key, text,
+                                model=ha.model, timeout=ha.timeout_seconds,
+                                session_id=session_id)
+    if _router is None:
+        return "", "router not available"
+    resp = await _router.route(text, [], max_tokens=80)
+    return resp.text, resp.error
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     messages = await get_recent_messages(_db_path, limit=50)
@@ -99,20 +114,16 @@ async def api_voice(request: Request, audio: UploadFile = File(...)):
     if not text:
         return {"error": "empty transcription"}
 
-    if _router is None:
-        return {"transcript": text, "error": "router not available"}  # type: ignore
+    reply_text, brain_err = await _brain(text)
+    log.info("voice: brain => %r (error=%s)", reply_text[:120], brain_err)
 
-    response = await _router.route(text, [], max_tokens=80)
-    log.info("voice: LLM => %r (error=%s)", response.text[:120], response.error)
-
-    if not response.text:
-        log.error("voice: LLM returned empty text, error=%s", response.error)
-        return {"transcript": text, "reply": "I had a brain freeze -- check the logs.", "error": f"LLM empty: {response.error}"}
+    if not reply_text:
+        log.error("voice: brain returned empty text, error=%s", brain_err)
+        return {"transcript": text, "reply": "I had a brain freeze -- check the logs.", "error": f"LLM empty: {brain_err}"}
 
     def _h(s: str) -> str:
         return s.encode("ascii", errors="replace").decode("ascii")
 
-    reply_text = response.text
     transcript_text = text
 
     try:
@@ -159,20 +170,15 @@ async def api_chat(request: Request):
     if not text:
         return {"error": "empty text"}
 
-    if _router is None:
-        return {"error": "router not available"}
-
     from ..voice import elevenlabs_provider
-    response = await _router.route(text, [], max_tokens=80)
-    log.info("chat: %r => %r", text[:60], response.text[:80])
+    reply_text, brain_err = await _brain(text)
+    log.info("chat: %r => %r", text[:60], reply_text[:80])
 
-    if not response.text:
-        return {"error": f"LLM empty: {response.error}"}
+    if not reply_text:
+        return {"error": f"LLM empty: {brain_err}"}
 
     def _h(s: str) -> str:
         return s.encode("ascii", errors="replace").decode("ascii")
-
-    reply_text = response.text
 
     # If ElevenLabs is not configured, return JSON so the HUD can show the text reply
     if not elevenlabs_provider.is_ready():

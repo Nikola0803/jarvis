@@ -98,6 +98,16 @@ class ElevenLabsConfig(BaseModel):
     voice_id: str = "21m00Tcm4TlvDq8ikWAM"  # Rachel -- swap to any ElevenLabs voice ID
 
 
+class HermesAgentConfig(BaseModel):
+    """Nous Research's Hermes Agent as the brain, via its OpenAI-compatible API.
+    When enabled, the HUD's voice/chat go to Hermes instead of the local router."""
+    enabled: bool = False
+    base_url: str = "http://127.0.0.1:8642/v1"
+    api_key: str = ""
+    model: str = "hermes"
+    timeout_seconds: float = 90.0
+
+
 class DatabaseConfig(BaseModel):
     path: str = "/home/hermes/.hermes/hermes.db"
 
@@ -121,6 +131,7 @@ class Config(BaseModel):
     groq: Optional[GroqConfig] = None
     elevenlabs: Optional[ElevenLabsConfig] = None
     router: RouterConfig = RouterConfig()
+    hermes_agent: Optional[HermesAgentConfig] = None
     database: DatabaseConfig = DatabaseConfig()
     dashboard: DashboardConfig = DashboardConfig()
     server: dict = {}
