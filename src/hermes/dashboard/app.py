@@ -104,6 +104,19 @@ async def api_reminders():
         return {"reminders": [], "error": str(exc)}
 
 
+@app.get("/api/projects")
+async def api_projects():
+    """GitHub repos + open-work counts for the HUD PROJECTS panel."""
+    gh_cfg = getattr(_cfg, "github", None) if _cfg else None
+    if not gh_cfg or not gh_cfg.token:
+        return {"projects": [], "error": "GitHub not configured."}
+    from ..integrations import github as gh
+    try:
+        return {"projects": await gh.projects_overview(gh_cfg)}
+    except Exception as exc:  # noqa: BLE001
+        return {"projects": [], "error": str(exc)}
+
+
 @app.get("/api/connections")
 async def api_connections():
     """Live connection status for every integration Jarvis has."""

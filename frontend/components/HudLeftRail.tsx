@@ -1,10 +1,10 @@
 "use client";
 
 /**
- * Left rail: the inbox glance. Unread mail from every connected account, newest
- * and highest-priority first. Click a row to read it via Z.E.R.O, or reply.
- * Polls the backend every 90s and refreshes immediately when a voice turn ends
- * (voiceActive flips back to false).
+ * Left rail: the inbox + projects glance. Unread mail from every connected
+ * account on top, then the GitHub projects you're working on underneath.
+ * Click a mail row to read it via Z.E.R.O; click a project to ask about it.
+ * Polls the backend and refreshes immediately when a voice turn ends.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -20,6 +20,16 @@ type Mail = {
   _acct: string;
 };
 
+type Project = {
+  name: string;
+  short: string;
+  description: string;
+  open_issues: number;
+  pushed_at: string | null;
+  private: boolean;
+  url: string;
+};
+
 export default function HudLeftRail({
   voiceActive,
   onAsk,
@@ -29,6 +39,7 @@ export default function HudLeftRail({
 }) {
   const [rows, setRows] = useState<Mail[] | null>(null);
   const [err, setErr] = useState<string>("");
+  const [projects, setProjects] = useState<Project[] | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -55,45 +66,85 @@ export default function HudLeftRail({
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const loadProjects = useCallback(async () => {
+    try {
+      const res = await fetch("/api/jarvis/projects", { cache: "no-store" });
+      const data = await res.json();
+      setProjects(Array.isArray(data?.projects) ? data.projects : []);
+    } catch {
+      setProjects((p) => p ?? []);
+    }
+  }, []);
+
+  useEffect(() => { load(); loadProjects(); }, [load, loadProjects]);
   useEffect(() => {
     const id = setInterval(load, 90000);
-    return () => clearInterval(id);
-  }, [load]);
+    const p = setInterval(loadProjects, 180000);
+    return () => { clearInterval(id); clearInterval(p); };
+  }, [load, loadProjects]);
   // A finished voice turn usually means something changed — pull fresh mail.
   useEffect(() => { if (!voiceActive) load(); }, [voiceActive, load]);
 
   const unreadCount = rows?.length ?? 0;
 
   return (
-    <aside className="hud-rail hud-rail-left" aria-label="Unread mail">
-      <RailHeader title="Inbox" badge={rows ? String(unreadCount) : undefined} onRefresh={load} />
+    <aside className="hud-rail hud-rail-left" aria-label="Inbox and projects">
+      <section className="hud-rail-section hud-rail-section-grow">
+        <RailHeader title="Inbox" badge={rows ? String(unreadCount) : undefined} onRefresh={load} />
+        <div className="hud-rail-body">
+          {rows === null && <div className="hud-empty">syncing…</div>}
+          {err && <div className="hud-empty">{err}</div>}
+          {rows && rows.length === 0 && !err && <div className="hud-empty">no unread mail</div>}
 
-      <div className="hud-rail-body">
-        {rows === null && <div className="hud-empty">syncing…</div>}
-        {err && <div className="hud-empty">{err}</div>}
-        {rows && rows.length === 0 && !err && <div className="hud-empty">no unread mail</div>}
-
-        {rows?.map((m) => (
-          <div
-            key={m.id}
-            className={`hud-mail ${m.priority === "high" ? "is-hot" : ""}`}
-            role="button"
-            tabIndex={0}
-            onClick={() => onAsk(`/mail read ${m.id}`)}
-            onKeyDown={(e) => { if (e.key === "Enter") onAsk(`/mail read ${m.id}`); }}
-            title="Click to have Z.E.R.O read it, shift-click to reply"
-            onAuxClick={() => onAsk(`/mail reply ${m.id} saying `)}
-          >
-            <div className="hud-mail-top">
-              <span className="hud-mail-from">{(m.from || "").split("<")[0].trim() || m.from}</span>
-              <span className="hud-mail-time">{fmtTime(m.date)}</span>
+          {rows?.map((m) => (
+            <div
+              key={m.id}
+              className={`hud-mail ${m.priority === "high" ? "is-hot" : ""}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => onAsk(`/mail read ${m.id}`)}
+              onKeyDown={(e) => { if (e.key === "Enter") onAsk(`/mail read ${m.id}`); }}
+              title="Click to have Z.E.R.O read it, shift-click to reply"
+              onAuxClick={() => onAsk(`/mail reply ${m.id} saying `)}
+            >
+              <div className="hud-mail-top">
+                <span className="hud-mail-from">{(m.from || "").split("<")[0].trim() || m.from}</span>
+                <span className="hud-mail-time">{fmtTime(m.date)}</span>
+              </div>
+              <div className="hud-mail-subject">{m.subject || "(no subject)"}</div>
+              <div className="hud-mail-snippet">{cleanSnippet(m.snippet)}</div>
             </div>
-            <div className="hud-mail-subject">{m.subject || "(no subject)"}</div>
-            <div className="hud-mail-snippet">{cleanSnippet(m.snippet)}</div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="hud-rail-section">
+        <RailHeader title="Projects" badge={projects?.length ? String(projects.length) : undefined} onRefresh={loadProjects} />
+        <div className="hud-rail-body hud-rail-body-short">
+          {projects === null && <div className="hud-empty">syncing…</div>}
+          {projects && projects.length === 0 && <div className="hud-empty">no projects</div>}
+          {projects?.map((p) => (
+            <div
+              key={p.name}
+              className="hud-project"
+              role="button"
+              tabIndex={0}
+              onClick={() => onAsk(`What's open on ${p.name}? List the issues and pull requests.`)}
+              onKeyDown={(e) => { if (e.key === "Enter") onAsk(`What's open on ${p.name}?`); }}
+              title="Ask Z.E.R.O what's open on this repo"
+            >
+              <div className="hud-project-top">
+                <span className="hud-project-name">{p.short || p.name}</span>
+                {p.open_issues > 0 && <span className="hud-project-count">{p.open_issues} open</span>}
+              </div>
+              <div className="hud-project-meta">
+                {p.private && <span className="hud-project-lock">private</span>}
+                <span className="hud-project-time">{fmtTime(p.pushed_at)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
     </aside>
   );
 }

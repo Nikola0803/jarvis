@@ -259,5 +259,67 @@ async def complete_reminder(reminder_id: int) -> str:
     return "Done." if ok else "No open reminder with that id."
 
 
+# ── GitHub / projects ────────────────────────────────────────────────────────
+
+_GH = _CFG.get("github") or {}
+_GH_TOKEN = _GH.get("token", "")
+_GH_REPOS = _GH.get("repos") or []
+_GH_MAX = _GH.get("max_shown", 8)
+
+
+@mcp.tool()
+async def list_github_projects(limit: int = 8) -> str:
+    """List the owner's GitHub repos (most recently active first) with how many
+    issues/PRs are open on each. Use for 'what am I working on' questions."""
+    if not _GH_TOKEN:
+        return "GitHub is not configured."
+    from hermes.integrations import github as gh
+    try:
+        repos = await gh.list_repos(_GH_TOKEN, limit=limit, repos=_GH_REPOS or None)
+    except Exception as exc:  # noqa: BLE001
+        return f"GitHub error: {exc}"
+    if not repos:
+        return "No repositories found."
+    out = []
+    for r in repos:
+        out.append(f"{r['name']} — {r['open_issues']} open — pushed {r.get('pushed_at', '')[:10]}"
+                   + (f" — {r['description']}" if r.get("description") else ""))
+    return "\n".join(out)
+
+
+@mcp.tool()
+async def list_repo_issues(repo: str, limit: int = 10) -> str:
+    """List open issues for one repo, given as 'owner/name'."""
+    if not _GH_TOKEN:
+        return "GitHub is not configured."
+    from hermes.integrations import github as gh
+    try:
+        issues = await gh.list_open_issues(_GH_TOKEN, repo, limit=limit)
+    except Exception as exc:  # noqa: BLE001
+        return f"GitHub error: {exc}"
+    if not issues:
+        return f"No open issues in {repo}."
+    return "\n".join(f"#{i['number']} {i['title']}"
+                     + (f" [{', '.join(i['labels'])}]" if i.get("labels") else "")
+                     for i in issues)
+
+
+@mcp.tool()
+async def list_repo_pull_requests(repo: str, limit: int = 10) -> str:
+    """List open pull requests for one repo, given as 'owner/name'."""
+    if not _GH_TOKEN:
+        return "GitHub is not configured."
+    from hermes.integrations import github as gh
+    try:
+        prs = await gh.list_open_pull_requests(_GH_TOKEN, repo, limit=limit)
+    except Exception as exc:  # noqa: BLE001
+        return f"GitHub error: {exc}"
+    if not prs:
+        return f"No open pull requests in {repo}."
+    return "\n".join(f"#{p['number']} {p['title']}" + (" (draft)" if p.get("draft") else "")
+                     + (f" — @{p['author']}" if p.get("author") else "")
+                     for p in prs)
+
+
 if __name__ == "__main__":
     mcp.run()

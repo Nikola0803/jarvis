@@ -105,6 +105,14 @@ memory:
   timeout_seconds: 6.0           # memory never blocks a reply longer than this
   namespace: "hermes"            # tag used to scope memories to this agent
 
+# GitHub -- powers the HUD PROJECTS panel and ZERO's repo tools (read-only use).
+# token: a personal access token (classic, 'repo' scope). Keep it out of git.
+github:
+  token: ""                      # ghp_... personal access token
+  username: ""                   # optional; the token's own user by default
+  repos: []                      # optional allowlist e.g. ["me/site", "me/crm"]; empty = all the token sees
+  max_shown: 8                   # repos shown in the PROJECTS panel
+
 database:
   path: "/home/hermes/.hermes/hermes.db"
 
