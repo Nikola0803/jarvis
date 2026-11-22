@@ -82,12 +82,28 @@ router:
   complex_provider: "claude"
   free_fallback: "gemini"
   short_message_max_tokens: 150  # messages under this -> deepseek
+  history_limit: 10              # past exchanges replayed as conversation memory
   claude_trigger_prefixes:
     - "/code"
     - "/analyze"
     - "/plan"
     - "/think"
     - "/research"
+
+# Long-term "facts brain" (Supermemory). Conversation history works without this;
+# this layer remembers facts about you ACROSS sessions and injects only the
+# relevant ones per message. Leave enabled:false until you have an API key.
+# Get a free key at console.supermemory.ai, then set enabled:true.
+memory:
+  enabled: false
+  provider: "supermemory"
+  api_key: ""                    # sm_... from console.supermemory.ai
+  base_url: "https://api.supermemory.ai"
+  add_path: "/v3/documents"      # override only if the API path changes
+  search_path: "/v4/search"
+  search_limit: 5                # how many facts to retrieve per message
+  timeout_seconds: 6.0           # memory never blocks a reply longer than this
+  namespace: "hermes"            # tag used to scope memories to this agent
 
 database:
   path: "/home/hermes/.hermes/hermes.db"

@@ -74,7 +74,7 @@ def build_app(
         # Persistent conversation memory: last N exchanges from the DB, so it
         # survives restarts and stays scoped to this user.
         history = await get_conversation_history(db_path, PLATFORM, user_id, limit=10)
-        response = await router.route(text, history, max_tokens=300)
+        response = await router.route(text, history, user_id=user_id, max_tokens=300)
 
         if response.error and not response.text:
             await update.message.reply_text("Something went wrong. Try again.")
@@ -115,7 +115,7 @@ def build_app(
 
         # Route through LLM (voice -- keep short). Shared persistent memory.
         history = await get_conversation_history(db_path, PLATFORM, user_id, limit=10)
-        response = await router.route(text, history, max_tokens=80)
+        response = await router.route(text, history, user_id=user_id, max_tokens=80)
 
         if response.error and not response.text:
             await update.message.reply_text("Something went wrong. Try again.")

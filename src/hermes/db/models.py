@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS messages (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
     direction   TEXT NOT NULL,       -- 'in' | 'out'
-    platform    TEXT,                -- 'telegram' | 'whatsapp' | 'discord' | 'slack' | 'hud'
+    platform    TEXT,                -- 'telegram' | 'whatsapp' | 'discord' | 'slack' | 'hud' | 'calendar'
     user_id     TEXT,                -- platform-scoped user identifier
     provider    TEXT,                -- 'deepseek' | 'claude' | 'gemini'
     model       TEXT,

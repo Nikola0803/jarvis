@@ -93,7 +93,7 @@ async def main():
         history = await get_conversation_history(
             cfg.database.path, platform, user_id, limit=cfg.router.history_limit
         )
-        response = await router.route(text, history)
+        response = await router.route(text, history, user_id=user_id)
         await log_message(cfg.database.path, text, response,
                           platform=platform, user_id=user_id)
         return response.text

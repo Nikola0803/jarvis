@@ -1,7 +1,9 @@
 from __future__ import annotations
+import asyncio
 import logging
 from .config import RouterConfig, Config
 from .llm import ClaudeProvider, DeepSeekProvider, GeminiProvider, OpenAICompatProvider, LLMResponse
+from .memory import build_memory
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +34,7 @@ class Router:
         self._spend_cap = cfg.anthropic.spend_cap_usd
         self._anthropic_key = cfg.anthropic.api_key
         self._anthropic_model = cfg.anthropic.model
+        self._memory = build_memory(cfg.memory)
 
         self._providers: dict[str, any] = {
             "claude": ClaudeProvider(cfg.anthropic.api_key, cfg.anthropic.model),
@@ -61,6 +64,10 @@ class Router:
             self._cfg = RouterConfig(
                 **{**self._cfg.model_dump(), "free_fallback": free}
             )
+
+    @property
+    def memory_enabled(self) -> bool:
+        return self._memory is not None
 
     def _select_provider(self, text: str, history: list[dict]) -> str:
         text_lower = text.lower().strip()
@@ -97,7 +104,16 @@ class Router:
             return False
         return True
 
-    async def route(self, text: str, history: list[dict] | None = None, max_tokens: int = 1024) -> LLMResponse:
+    def _remember(self, text: str, reply: str, user_id: str | None) -> None:
+        """Fire-and-forget: store this exchange in the external memory backend
+        (Supermemory). No-op unless a memory backend is configured."""
+        if not self._memory or not user_id:
+            return
+        exchange = f"User said: {text}\nHermes replied: {reply}"
+        asyncio.create_task(self._memory.add(exchange, user_id))
+
+    async def route(self, text: str, history: list[dict] | None = None,
+                    user_id: str | None = None, max_tokens: int = 1024) -> LLMResponse:
         from .self_improve import is_improve_request, apply as _improve
         if is_improve_request(text) and self._anthropic_key:
             status = await _improve(text, self._anthropic_key, self._anthropic_model)
@@ -107,7 +123,8 @@ class Router:
         history = history or []
         messages = history + [{"role": "user", "content": text}]
 
-        # Inject memory context into system prompt
+        # Base system prompt: the always-on local SQLite "facts brain" (owner
+        # profile + relevant facts). This is the store the MCP tools write to.
         system = SYSTEM_PROMPT
         try:
             from .memory import get_store, build_context_prefix
@@ -117,6 +134,18 @@ class Router:
                 system = context_prefix
         except Exception:
             pass
+
+        # Optionally layer the external long-term memory backend (Supermemory),
+        # user-scoped. No-op unless cfg.memory is configured.
+        if self._memory and user_id:
+            try:
+                facts = await self._memory.search(text, user_id)
+                if facts:
+                    system = (system + "\n\nRelevant things you remember about this "
+                              "user (use them only when helpful, do not recite them):\n"
+                              + facts)
+            except Exception:
+                pass
 
         provider_name = self._select_provider(text, history)
 
@@ -136,11 +165,12 @@ class Router:
             fallback = self._providers[self._cfg.free_fallback]
             response = await fallback.complete(messages, system=system, max_tokens=max_tokens)
 
-        # Extract and store facts from this exchange (async, non-blocking)
         if response.text and not response.error:
+            # External backend (Supermemory), if configured.
+            self._remember(text, response.text, user_id)
+            # Local SQLite fact extraction (async, non-blocking) -- feeds the
+            # facts brain the MCP tools and HUD read from.
             try:
-                import asyncio
-                from .memory.extractor import extract_facts
                 from .memory import get_store
                 mem = get_store()
                 cheap = self._providers.get("deepseek") or self._providers.get(self._cfg.free_fallback)
