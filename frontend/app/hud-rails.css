@@ -18,7 +18,9 @@
   font-family: var(--font-ui);
   animation: hud-rail-in 0.9s ease both;
 }
-.hud-rail-left { left: clamp(12px, 2vw, 34px); }
+/* The left rail clears the top-left overview strip (clock/weather/greeting)
+   so the Inbox never paints over it. The right rail starts at the top. */
+.hud-rail-left { left: clamp(12px, 2vw, 34px); top: 176px; }
 .hud-rail-right { right: clamp(12px, 2vw, 34px); }
 
 @keyframes hud-rail-in {

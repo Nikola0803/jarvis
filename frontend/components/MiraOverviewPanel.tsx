@@ -60,7 +60,6 @@ function useConnections() {
 function Clock() {
   const [now, setNow] = useState<Date | null>(null);
   const [wx, setWx] = useState<{ temp: number | null; code: number | null; city: string } | null>(null);
-  const [otd, setOtd] = useState("");
 
   useEffect(() => {
     setNow(new Date());
@@ -79,15 +78,6 @@ function Clock() {
     load();
     const id = setInterval(load, 1200000);
     return () => { ok = false; clearInterval(id); };
-  }, []);
-
-  useEffect(() => {
-    let ok = true;
-    fetch("/api/onthisday")
-      .then((r) => r.json())
-      .then((d) => { if (ok && d?.text) setOtd(d.text); })
-      .catch(() => {});
-    return () => { ok = false; };
   }, []);
 
   if (!now) return <div style={{ height: 48 }} />;
@@ -114,12 +104,6 @@ function Clock() {
       </div>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 26, flexWrap: "wrap" }}>
         <div style={{ minWidth: 112, fontFamily: "var(--font-ui)", fontSize: 11, letterSpacing: "0.12em", color: "rgba(240,237,232,0.5)", paddingTop: 2 }}>{greet.toUpperCase()}</div>
-        {otd && (
-          <div style={{ maxWidth: 380, minWidth: 180, flex: "1 1 220px" }}>
-            <div style={{ fontFamily: "var(--font-ui)", fontSize: 9, letterSpacing: "0.2em", color: ACCENT, marginBottom: 3 }}>ON THIS DAY</div>
-            <div style={{ fontFamily: "var(--font-ui)", fontSize: 11.5, lineHeight: 1.4, color: "rgba(240,237,232,0.62)" }}>{otd}</div>
-          </div>
-        )}
       </div>
     </div>
   );
