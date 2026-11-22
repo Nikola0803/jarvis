@@ -165,17 +165,44 @@ async def main():
             tasks.append(dc_client.start(dc_token))
             log.info("Discord bot starting")
 
-    # Slack (optional -- webhook via FastAPI)
+    # Slack (optional). Socket Mode when an app-level token is set (no public URL
+    # needed); otherwise the legacy HTTP webhook. Slack talks to the Hermes Agent
+    # brain (full tools) when enabled, falling back to the local router.
     if cfg.slack:
-        from .slack_bot import configure as sl_cfg, build_app as sl_build
-        sl_cfg(handle_message)
-        result = sl_build(cfg.slack.bot_token, cfg.slack.signing_secret)
-        if result[0]:
-            sl_app, sl_handler = result
-            @dashboard_app.post("/webhook/slack")
-            async def slack_events(req: Request):
-                return await sl_handler.handle(req)
-            log.info("Slack webhook at /webhook/slack")
+        from .slack_bot import configure as sl_cfg
+
+        async def slack_brain(platform: str, user_id: str, text: str) -> str:
+            ha = getattr(cfg, "hermes_agent", None)
+            if ha and ha.enabled:
+                from .hermes_client import ask_hermes, TEXT_SYSTEM
+                reply, err = await ask_hermes(
+                    ha.base_url, ha.api_key, text,
+                    model=ha.model, timeout=ha.timeout_seconds,
+                    session_id=f"slack:{user_id}", reasoning=False,
+                    system=TEXT_SYSTEM,
+                )
+                if reply:
+                    return reply
+                if err:
+                    log.warning("slack hermes error: %s", err)
+            return await handle_message(platform, user_id, text)
+
+        sl_cfg(slack_brain)
+        if getattr(cfg.slack, "app_token", ""):
+            from .slack_bot import build_socket_handler
+            sl_handler = build_socket_handler(cfg.slack.bot_token, cfg.slack.app_token)
+            if sl_handler:
+                tasks.append(sl_handler.start_async())
+                log.info("Slack Socket Mode started")
+        else:
+            from .slack_bot import build_app as sl_build
+            result = sl_build(cfg.slack.bot_token, cfg.slack.signing_secret)
+            if result[0]:
+                sl_app, sl_handler = result
+                @dashboard_app.post("/webhook/slack")
+                async def slack_events(req: Request):
+                    return await sl_handler.handle(req)
+                log.info("Slack webhook at /webhook/slack")
 
     # FastAPI (dashboard + all webhooks)
     uv_config = uvicorn.Config(

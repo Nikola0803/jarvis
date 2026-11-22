@@ -14,8 +14,9 @@ discord:
   owner_id: 123456789           # your Discord user ID (optional)
 
 slack:
-  bot_token: "xoxb-..."
-  signing_secret: "YOUR_SLACK_SIGNING_SECRET"
+  bot_token: "xoxb-..."          # Bot User OAuth Token
+  app_token: "xapp-..."          # App-Level Token (Socket Mode) -- set this to use Socket Mode
+  signing_secret: ""             # only for the legacy HTTP webhook mode
 
 # Google Calendar (supports multiple accounts)
 # Same credentials file as Gmail -- one OAuth2 app covers both.

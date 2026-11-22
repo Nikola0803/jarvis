@@ -34,12 +34,22 @@ VOICE_SYSTEM = (
 )
 
 
+# Slack/text channels: allow a normal written reply (still clean, no rambling).
+TEXT_SYSTEM = (
+    "You are Z.E.R.O, the owner's personal AI assistant and orchestrator, "
+    "answering in Slack. Be concise and useful: a few sentences, short lists when "
+    "they help. When the question needs real data (email, calendar, reminders, "
+    "projects, code), use your tools, then answer plainly. No preamble about what "
+    "you are about to do."
+)
+
+
 def _payload(text: str, *, model: str, stream: bool, session_id: str | None,
-             reasoning: bool) -> dict:
+             reasoning: bool, system: str | None = None) -> dict:
     payload: dict = {
         "model": model,
         "messages": [
-            {"role": "system", "content": VOICE_SYSTEM},
+            {"role": "system", "content": system or VOICE_SYSTEM},
             {"role": "user", "content": text},
         ],
     }
@@ -74,12 +84,13 @@ async def ask_hermes(
     timeout: float = 90.0,
     session_id: str | None = None,
     reasoning: bool = False,
+    system: str | None = None,
 ) -> tuple[str, str | None]:
     """Send one message to Hermes Agent, return (reply_text, error_or_None)."""
     url = base_url.rstrip("/") + "/chat/completions"
     headers = _headers(api_key, session_id)
     payload = _payload(text, model=model, stream=False, session_id=session_id,
-                       reasoning=reasoning)
+                       reasoning=reasoning, system=system)
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             r = await client.post(url, headers=headers, json=payload)
