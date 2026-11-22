@@ -222,5 +222,42 @@ def remember_fact(subject: str, relation: str, value: str) -> str:
     return "Remembered."
 
 
+# ── Reminders / tasks ────────────────────────────────────────────────────────
+
+@mcp.tool()
+async def add_reminder(text: str, due_iso: str = "", project: str = "") -> str:
+    """Add a reminder or task for the owner. `due_iso` is an ISO-8601 datetime
+    (e.g. 2026-11-25T15:00:00) or empty for no due time. `project` optionally
+    tags it to a project. Convert natural language like 'Tuesday 3pm' to ISO
+    yourself before calling."""
+    from hermes.db.queries import add_reminder as _add
+    rid = await _add(_DB_PATH, text, due_at=(due_iso or None), project=(project or None))
+    return f"Reminder #{rid} saved" + (f" (due {due_iso})" if due_iso else "") + "."
+
+
+@mcp.tool()
+async def list_reminders(include_done: bool = False) -> str:
+    """List the owner's open reminders/tasks (soonest due first)."""
+    from hermes.db.queries import list_reminders as _list
+    rows = await _list(_DB_PATH, include_done=include_done)
+    if not rows:
+        return "No open reminders."
+    out = []
+    for r in rows:
+        due = f" — due {r['due_at']}" if r.get("due_at") else ""
+        proj = f" [{r['project']}]" if r.get("project") else ""
+        mark = "x" if r.get("done") else " "
+        out.append(f"#{r['id']} [{mark}]{proj} {r['text']}{due}")
+    return "\n".join(out)
+
+
+@mcp.tool()
+async def complete_reminder(reminder_id: int) -> str:
+    """Mark a reminder/task done by its id."""
+    from hermes.db.queries import complete_reminder as _done
+    ok = await _done(_DB_PATH, reminder_id)
+    return "Done." if ok else "No open reminder with that id."
+
+
 if __name__ == "__main__":
     mcp.run()
