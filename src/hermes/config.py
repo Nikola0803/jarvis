@@ -24,8 +24,9 @@ class DiscordConfig(BaseModel):
 
 
 class SlackConfig(BaseModel):
-    bot_token: str
-    signing_secret: str
+    bot_token: str                 # xoxb-... bot token
+    app_token: str = ""            # xapp-... app-level token (Socket Mode)
+    signing_secret: str = ""       # only needed for the old HTTP webhook mode
 
 
 class GoogleAccountConfig(BaseModel):
