@@ -118,6 +118,24 @@ codex:
   extra_args: []                 # e.g. ["--full-auto"] if Codex won't write in your version
   timeout_seconds: 900
 
+# Claude Code -- a second coding hand next to Codex. Runs `claude -p` in a repo.
+# Supports multiple Claude logins: give each account its own CLAUDE_CONFIG_DIR
+# (sign in once per dir), then ZERO picks one with the `account` argument.
+claude_code:
+  enabled: false
+  binary: "claude"
+  default_repo: "/opt/jarvis"
+  allowed_repos:
+    - "/opt/jarvis"
+    - "/var/www/peptide-command-center"
+  accounts:
+    - name: "main"
+      config_dir: "/root/.claude-main"      # CLAUDE_CONFIG_DIR for account 1
+    - name: "second"
+      config_dir: "/root/.claude-second"    # CLAUDE_CONFIG_DIR for account 2
+  extra_args: ["--permission-mode", "acceptEdits"]
+  timeout_seconds: 900
+
 # GitHub -- powers the HUD PROJECTS panel and ZERO's repo tools (read-only use).
 # token: a personal access token (classic, 'repo' scope). Keep it out of git.
 github:
