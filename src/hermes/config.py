@@ -29,6 +29,17 @@ class SlackConfig(BaseModel):
     signing_secret: str = ""       # only needed for the old HTTP webhook mode
 
 
+class SlackAgentConfig(BaseModel):
+    """An extra Slack identity (a specialist bot) backed by the SAME ZERO brain.
+    Its own Slack app/tokens give it a distinct @name; `system` is its persona.
+    Context is shared because every agent routes to the one Hermes brain."""
+    name: str
+    bot_token: str                 # xoxb-... for this specialist's app
+    app_token: str                 # xapp-... (Socket Mode) for this specialist's app
+    system: str = ""               # persona/system prompt; empty = default text style
+    enabled: bool = True
+
+
 class GoogleAccountConfig(BaseModel):
     name: str = "primary"
     token_file: str = "/home/hermes/.hermes/google_token_primary.json"
@@ -180,6 +191,7 @@ class Config(BaseModel):
     whatsapp: Optional[WhatsAppConfig] = None
     discord: Optional[DiscordConfig] = None
     slack: Optional[SlackConfig] = None
+    slack_agents: List[SlackAgentConfig] = Field(default_factory=list)
     calendar: Optional[CalendarConfig] = None
     gmail: Optional[GmailConfig] = None
     anthropic: AnthropicConfig

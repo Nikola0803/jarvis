@@ -14,9 +14,27 @@ discord:
   owner_id: 123456789           # your Discord user ID (optional)
 
 slack:
-  bot_token: "xoxb-..."          # Bot User OAuth Token
+  bot_token: "xoxb-..."          # Bot User OAuth Token (the main ZERO app)
   app_token: "xapp-..."          # App-Level Token (Socket Mode) -- set this to use Socket Mode
   signing_secret: ""             # only for the legacy HTTP webhook mode
+
+# Extra Slack identities -- specialist bots, each its own Slack app, ALL backed
+# by the one ZERO brain (shared memory + context). Only the persona differs.
+slack_agents:
+  - name: "Dev"
+    bot_token: "xoxb-..."        # Dev app's bot token
+    app_token: "xapp-..."        # Dev app's app-level token (Socket Mode)
+    system: >
+      You are Dev, the web-development specialist on the owner's AI team,
+      answering in Slack. You ship frontend, backend, API and deploy work. For
+      any coding or design task, use your code tools (Codex or Claude Code) in
+      the correct repo under /opt/jarvis or /var/www, then summarize what you
+      changed and link the PR if you opened one. Be concise and technical. If a
+      request is not about code, say so and suggest the owner ask ZERO.
+  # - name: "CFO"
+  #   bot_token: "xoxb-..."
+  #   app_token: "xapp-..."
+  #   system: "You are CFO, the finance specialist. Answer money questions from the CRM and Stripe."
 
 # Google Calendar (supports multiple accounts)
 # Same credentials file as Gmail -- one OAuth2 app covers both.
