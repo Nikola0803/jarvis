@@ -51,39 +51,37 @@ def build_app(bot_token: str, signing_secret: str):
     return app, handler
 
 
-def _wire_events(app) -> None:
-    """Attach the app_mention + DM handlers that route to the brain."""
+def _wire_events(app, brain) -> None:
+    """Attach app_mention + DM handlers that route to `brain(user_id, text, channel)`."""
     import re
+
+    async def _run(event, say):
+        text = re.sub(r"<@[A-Z0-9]+>", "", event.get("text", "")).strip()
+        user_id = event.get("user", "unknown")
+        channel = event.get("channel")
+        if not text:
+            return
+        try:
+            reply = await brain(user_id, text, channel)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("slack handler error: %s", exc)
+            reply = "Something went wrong handling that."
+        await say(reply or "…")
 
     @app.event("app_mention")
     async def handle_mention(event, say):
-        text = re.sub(r"<@[A-Z0-9]+>", "", event.get("text", "")).strip()
-        user_id = event.get("user", "unknown")
-        if _handler and text:
-            try:
-                reply = await _handler("slack", user_id, text)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("slack mention handler error: %s", exc)
-                reply = "Something went wrong handling that."
-            await say(reply or "…")
+        await _run(event, say)
 
     @app.event("message")
     async def handle_dm(event, say):
         if event.get("channel_type") != "im" or event.get("bot_id"):
             return
-        text = (event.get("text") or "").strip()
-        user_id = event.get("user", "unknown")
-        if _handler and text:
-            try:
-                reply = await _handler("slack", user_id, text)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("slack dm handler error: %s", exc)
-                reply = "Something went wrong handling that."
-            await say(reply or "…")
+        await _run(event, say)
 
 
-def build_socket_handler(bot_token: str, app_token: str):
-    """Socket Mode handler: no public URL or signing secret needed. Returns an
+def build_socket_handler(bot_token: str, app_token: str, brain):
+    """Socket Mode handler for one Slack app, routing to `brain(user_id, text,
+    channel)`. No public URL or signing secret needed. Returns an
     AsyncSocketModeHandler whose .start_async() runs the connection, or None."""
     try:
         from slack_bolt.async_app import AsyncApp
@@ -95,5 +93,5 @@ def build_socket_handler(bot_token: str, app_token: str):
         log.error("Slack Socket Mode needs an app-level token (xapp-...); none configured")
         return None
     app = AsyncApp(token=bot_token)
-    _wire_events(app)
+    _wire_events(app, brain)
     return AsyncSocketModeHandler(app, app_token)

@@ -166,36 +166,44 @@ async def main():
             log.info("Discord bot starting")
 
     # Slack (optional). Socket Mode when an app-level token is set (no public URL
-    # needed); otherwise the legacy HTTP webhook. Slack talks to the Hermes Agent
-    # brain (full tools) when enabled, falling back to the local router.
+    # needed); otherwise the legacy HTTP webhook. Every Slack identity -- the main
+    # ZERO app and each extra specialist in slack_agents -- routes to the SAME
+    # Hermes brain, with a session keyed by channel so they share context. Only
+    # the persona (system prompt) differs. Falls back to the local router.
     if cfg.slack:
-        from .slack_bot import configure as sl_cfg
+        from .hermes_client import TEXT_SYSTEM
 
-        async def slack_brain(platform: str, user_id: str, text: str) -> str:
-            ha = getattr(cfg, "hermes_agent", None)
-            if ha and ha.enabled:
-                from .hermes_client import ask_hermes, TEXT_SYSTEM
-                reply, err = await ask_hermes(
-                    ha.base_url, ha.api_key, text,
-                    model=ha.model, timeout=ha.timeout_seconds,
-                    session_id=f"slack:{user_id}", reasoning=False,
-                    system=TEXT_SYSTEM,
-                )
-                if reply:
-                    return reply
-                if err:
-                    log.warning("slack hermes error: %s", err)
-            return await handle_message(platform, user_id, text)
+        def make_slack_brain(system_prompt: str):
+            async def brain(user_id: str, text: str, channel: str | None) -> str:
+                ha = getattr(cfg, "hermes_agent", None)
+                # Shared session per channel (per user in DMs) so all agents and
+                # the owner share one running thread -- no lost context.
+                sess = f"slack:{channel}" if channel else f"slack:dm:{user_id}"
+                if ha and ha.enabled:
+                    from .hermes_client import ask_hermes
+                    reply, err = await ask_hermes(
+                        ha.base_url, ha.api_key, text,
+                        model=ha.model, timeout=ha.timeout_seconds,
+                        session_id=sess, reasoning=False, system=system_prompt,
+                    )
+                    if reply:
+                        return reply
+                    if err:
+                        log.warning("slack hermes error: %s", err)
+                return await handle_message("slack", user_id, text)
+            return brain
 
-        sl_cfg(slack_brain)
+        from .slack_bot import build_socket_handler as sl_socket
+
+        # Main ZERO identity
         if getattr(cfg.slack, "app_token", ""):
-            from .slack_bot import build_socket_handler
-            sl_handler = build_socket_handler(cfg.slack.bot_token, cfg.slack.app_token)
-            if sl_handler:
-                tasks.append(sl_handler.start_async())
-                log.info("Slack Socket Mode started")
+            h = sl_socket(cfg.slack.bot_token, cfg.slack.app_token, make_slack_brain(TEXT_SYSTEM))
+            if h:
+                tasks.append(h.start_async())
+                log.info("Slack Socket Mode started (ZERO)")
         else:
-            from .slack_bot import build_app as sl_build
+            from .slack_bot import configure as sl_cfg, build_app as sl_build
+            sl_cfg(handle_message)
             result = sl_build(cfg.slack.bot_token, cfg.slack.signing_secret)
             if result[0]:
                 sl_app, sl_handler = result
@@ -203,6 +211,16 @@ async def main():
                 async def slack_events(req: Request):
                     return await sl_handler.handle(req)
                 log.info("Slack webhook at /webhook/slack")
+
+        # Extra specialist identities (Dev, CFO, ...) -- same brain, own persona
+        for agent in (getattr(cfg, "slack_agents", None) or []):
+            if not getattr(agent, "enabled", True) or not agent.app_token:
+                continue
+            h = sl_socket(agent.bot_token, agent.app_token,
+                          make_slack_brain(agent.system or TEXT_SYSTEM))
+            if h:
+                tasks.append(h.start_async())
+                log.info("Slack Socket Mode started (%s)", agent.name)
 
     # FastAPI (dashboard + all webhooks)
     uv_config = uvicorn.Config(
