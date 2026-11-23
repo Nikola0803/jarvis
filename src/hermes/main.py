@@ -171,33 +171,26 @@ async def main():
     # Hermes brain, with a session keyed by channel so they share context. Only
     # the persona (system prompt) differs. Falls back to the local router.
     if cfg.slack:
-        from .hermes_client import TEXT_SYSTEM
+        from .slack_orchestrator import SlackOrchestrator
+        orch = SlackOrchestrator(cfg)
 
-        def make_slack_brain(system_prompt: str):
-            async def brain(user_id: str, text: str, channel: str | None) -> str:
+        def make_entry(agent_name: str):
+            """Entry brain for one Slack identity: run its persona, then follow
+            any HANDOFF chain across the team (all on the shared Hermes brain)."""
+            async def brain(user_id: str, text: str, channel: str | None, say) -> None:
                 ha = getattr(cfg, "hermes_agent", None)
-                # Shared session per channel (per user in DMs) so all agents and
-                # the owner share one running thread -- no lost context.
-                sess = f"slack:{channel}" if channel else f"slack:dm:{user_id}"
                 if ha and ha.enabled:
-                    from .hermes_client import ask_hermes
-                    reply, err = await ask_hermes(
-                        ha.base_url, ha.api_key, text,
-                        model=ha.model, timeout=ha.timeout_seconds,
-                        session_id=sess, reasoning=False, system=system_prompt,
-                    )
-                    if reply:
-                        return reply
-                    if err:
-                        log.warning("slack hermes error: %s", err)
-                return await handle_message("slack", user_id, text)
+                    await orch.run_chain(agent_name, text, channel, say=say)
+                else:
+                    reply = await handle_message("slack", user_id, text)
+                    await say(reply)
             return brain
 
         from .slack_bot import build_socket_handler as sl_socket
 
         # Main ZERO identity
         if getattr(cfg.slack, "app_token", ""):
-            h = sl_socket(cfg.slack.bot_token, cfg.slack.app_token, make_slack_brain(TEXT_SYSTEM))
+            h = sl_socket(cfg.slack.bot_token, cfg.slack.app_token, make_entry("zero"))
             if h:
                 tasks.append(h.start_async())
                 log.info("Slack Socket Mode started (ZERO)")
@@ -212,12 +205,11 @@ async def main():
                     return await sl_handler.handle(req)
                 log.info("Slack webhook at /webhook/slack")
 
-        # Extra specialist identities (Dev, CFO, ...) -- same brain, own persona
+        # Extra specialist identities (Dev, Designer, ...) -- same brain, own persona
         for agent in (getattr(cfg, "slack_agents", None) or []):
             if not getattr(agent, "enabled", True) or not agent.app_token:
                 continue
-            h = sl_socket(agent.bot_token, agent.app_token,
-                          make_slack_brain(agent.system or TEXT_SYSTEM))
+            h = sl_socket(agent.bot_token, agent.app_token, make_entry(agent.name))
             if h:
                 tasks.append(h.start_async())
                 log.info("Slack Socket Mode started (%s)", agent.name)

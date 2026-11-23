@@ -52,7 +52,8 @@ def build_app(bot_token: str, signing_secret: str):
 
 
 def _wire_events(app, brain) -> None:
-    """Attach app_mention + DM handlers that route to `brain(user_id, text, channel)`."""
+    """Attach app_mention + DM handlers. `brain(user_id, text, channel, say)` owns
+    posting (it may post as several agent identities during a handoff chain)."""
     import re
 
     async def _run(event, say):
@@ -62,11 +63,10 @@ def _wire_events(app, brain) -> None:
         if not text:
             return
         try:
-            reply = await brain(user_id, text, channel)
+            await brain(user_id, text, channel, say)
         except Exception as exc:  # noqa: BLE001
             log.warning("slack handler error: %s", exc)
-            reply = "Something went wrong handling that."
-        await say(reply or "…")
+            await say("Something went wrong handling that.")
 
     @app.event("app_mention")
     async def handle_mention(event, say):
